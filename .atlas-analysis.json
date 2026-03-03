@@ -1,0 +1,130 @@
+{
+  "projectType": "api-service",
+  "projectName": "ShopStack Platform",
+  "projectDescription": "Full-stack e-commerce platform with Flask and Express microservices featuring REST APIs, JWT auth, and Docker deployment.",
+  "theme": "aspen",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "services/python-service",
+              "services/node-service"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/environment-variables"
+            ]
+          },
+          {
+            "group": "Testing",
+            "pages": [
+              "testing/overview",
+              "testing/python-tests",
+              "testing/node-tests"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python Service API",
+            "pages": [
+              "api/python/authentication",
+              "api/python/products",
+              "api/python/orders",
+              "api/python/payments"
+            ]
+          },
+          {
+            "group": "Node Service API",
+            "pages": [
+              "api/node/authentication",
+              "api/node/users",
+              "api/node/products",
+              "api/node/reports"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Incident Resolution",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "incidents/getting-started",
+              "incidents/ticket-format"
+            ]
+          },
+          {
+            "group": "Python Service Issues",
+            "pages": [
+              "incidents/python/authentication-errors",
+              "incidents/python/order-management",
+              "incidents/python/payment-processing",
+              "incidents/python/product-operations"
+            ]
+          },
+          {
+            "group": "Node Service Issues",
+            "pages": [
+              "incidents/node/user-handling",
+              "incidents/node/product-search",
+              "incidents/node/report-generation",
+              "incidents/node/authentication"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Dual microservice architecture (Python Flask + Node.js Express)",
+    "JWT-based authentication with bcrypt password hashing",
+    "RESTful APIs for e-commerce operations (products, orders, payments)",
+    "SQLAlchemy and Sequelize ORM integration",
+    "Docker Compose orchestration with PostgreSQL and Redis",
+    "Comprehensive test suites with pytest and Jest",
+    "Structured incident tracking system",
+    "User management with profile operations"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/register",
+    "POST /api/auth/login",
+    "GET /api/auth/me",
+    "GET /api/products",
+    "GET /api/products/:id",
+    "GET /api/products/search",
+    "POST /api/products",
+    "GET /api/orders",
+    "GET /api/orders/:id",
+    "POST /api/orders",
+    "POST /api/payments/calculate",
+    "POST /api/payments/checkout",
+    "GET /api/users/:id",
+    "GET /api/users/me/profile",
+    "PUT /api/users/me/profile",
+    "GET /api/reports/sales",
+    "GET /api/health"
+  ]
+}
