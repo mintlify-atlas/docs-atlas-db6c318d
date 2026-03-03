@@ -137,16 +137,9 @@ Used when `FLASK_ENV=staging` or `FLASK_ENV=production`:
   ```
 </ParamField>
 
-### Database Host Configuration
-
-<ParamField path="DATABASE_HOST" type="string" default="localhost">
-  PostgreSQL host for database connection. Used in Docker Compose to reference the postgres service.
-  
-  **Example**:
-  ```bash
-  DATABASE_HOST=postgres
-  ```
-</ParamField>
+<Note>
+  **Database Host Configuration**: In development mode, the host is hardcoded to `localhost`. In staging/production modes, use the `DB_HOST` variable documented above to specify the PostgreSQL host.
+</Note>
 
 ### Caching
 

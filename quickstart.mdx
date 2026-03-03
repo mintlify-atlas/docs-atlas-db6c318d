@@ -107,11 +107,16 @@ Before you begin, ensure you have the following installed:
       </Step>
       
       <Step title="Verify services are running">
-        Check the health endpoints:
+        Check the Node.js health endpoint:
         
         ```bash
-        curl http://localhost:5000/api/health
         curl http://localhost:3000/api/health
+        ```
+        
+        And verify Python service is running by accessing any endpoint:
+        
+        ```bash
+        curl http://localhost:5000/api/products
         ```
       </Step>
     </Steps>
