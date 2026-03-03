@@ -1,0 +1,383 @@
+---
+title: Docker Deployment
+description: Deploy ShopStack Platform using Docker and Docker Compose
+---
+
+## Overview
+
+ShopStack Platform provides a complete Docker setup that orchestrates all services including the Python service, Node.js service, PostgreSQL database, and Redis cache.
+
+## Prerequisites
+
+- Docker Engine 20.10 or later
+- Docker Compose V2 or docker-compose 1.29+
+- At least 2GB of available RAM
+- Ports 3000, 5000, 5432, and 6379 available
+
+## Docker Compose Configuration
+
+The platform uses a `docker-compose.yml` file that defines all services and their dependencies:
+
+```yaml
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+      POSTGRES_DB: ecommerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d ecommerce"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  python-service:
+    build: ./python-service
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=appuser
+      - DATABASE_PASSWORD=apppassword
+      - DATABASE_NAME=ecommerce
+      - REDIS_URL=redis://redis:6379/0
+      - FLASK_ENV=staging
+      - SECRET_KEY=supersecretkey123
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  node-service:
+    build: ./node-service
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=appuser
+      - DB_PASSWORD=apppassword
+      - DB_NAME=ecommerce
+      - REDIS_URL=redis://redis:6379/1
+      - NODE_ENV=production
+      - JWT_SECRET=anothersecretkey456
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+```
+
+## Service Architecture
+
+### PostgreSQL Database
+
+- **Image**: `postgres:15-alpine`
+- **Port**: 5432
+- **Database**: `ecommerce`
+- **Volume**: Persistent data storage in `pgdata` volume
+- **Health Check**: Verifies database is ready using `pg_isready`
+
+### Redis Cache
+
+- **Image**: `redis:7-alpine`
+- **Port**: 6379
+- **Health Check**: Verifies Redis is responding using `redis-cli ping`
+- **Databases**: Separate databases for each service (DB 0 for Python, DB 1 for Node)
+
+### Python Service
+
+- **Base Image**: `python:3.11-slim`
+- **Port**: 5000
+- **Runtime**: Gunicorn with 2 workers
+- **Dependencies**: Waits for healthy PostgreSQL and Redis
+
+Dockerfile:
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "run:app"]
+```
+
+### Node.js Service
+
+- **Base Image**: `node:18-alpine`
+- **Port**: 3000
+- **Runtime**: Node.js with production dependencies
+- **Dependencies**: Waits for healthy PostgreSQL and Redis
+
+Dockerfile:
+```dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --production
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["node", "src/index.js"]
+```
+
+## Deployment Commands
+
+### Start All Services
+
+Build and start all services in detached mode:
+
+```bash
+docker-compose up -d
+```
+
+### Build Services
+
+Rebuild all service images:
+
+```bash
+docker-compose build
+```
+
+Rebuild without cache:
+
+```bash
+docker-compose build --no-cache
+```
+
+### View Logs
+
+View logs from all services:
+
+```bash
+docker-compose logs -f
+```
+
+View logs from a specific service:
+
+```bash
+docker-compose logs -f python-service
+docker-compose logs -f node-service
+```
+
+### Check Service Status
+
+View running services:
+
+```bash
+docker-compose ps
+```
+
+### Stop Services
+
+Stop all services:
+
+```bash
+docker-compose down
+```
+
+Stop and remove volumes (deletes all data):
+
+```bash
+docker-compose down -v
+```
+
+### Restart Services
+
+Restart a specific service:
+
+```bash
+docker-compose restart python-service
+docker-compose restart node-service
+```
+
+## Health Checks
+
+All services include health checks to ensure proper startup order:
+
+### PostgreSQL Health Check
+
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U appuser -d ecommerce"]
+  interval: 5s
+  timeout: 5s
+  retries: 5
+```
+
+### Redis Health Check
+
+```yaml
+healthcheck:
+  test: ["CMD", "redis-cli", "ping"]
+  interval: 5s
+  timeout: 5s
+  retries: 5
+```
+
+The Python and Node services use `depends_on` with `condition: service_healthy` to ensure they only start after PostgreSQL and Redis are ready.
+
+## Port Mappings
+
+| Service | Container Port | Host Port | Description |
+|---------|---------------|-----------|-------------|
+| Python Service | 5000 | 5000 | Flask API endpoint |
+| Node Service | 3000 | 3000 | Node.js API endpoint |
+| PostgreSQL | 5432 | 5432 | Database connection |
+| Redis | 6379 | 6379 | Cache connection |
+
+## Volume Management
+
+### PostgreSQL Data Persistence
+
+The `pgdata` volume ensures database data persists across container restarts:
+
+```yaml
+volumes:
+  pgdata:
+```
+
+To back up the database:
+
+```bash
+docker-compose exec postgres pg_dump -U appuser ecommerce > backup.sql
+```
+
+To restore from backup:
+
+```bash
+cat backup.sql | docker-compose exec -T postgres psql -U appuser ecommerce
+```
+
+## Production Considerations
+
+### Security
+
+<Warning>
+  The default configuration uses development credentials. Always change these in production.
+</Warning>
+
+1. **Change default passwords**: Update `POSTGRES_PASSWORD`, `SECRET_KEY`, and `JWT_SECRET`
+2. **Use secrets management**: Consider using Docker secrets or external secret management
+3. **Restrict ports**: Only expose necessary ports to the host
+4. **Network isolation**: Use Docker networks to isolate services
+
+### Performance
+
+1. **Gunicorn workers**: Adjust worker count based on CPU cores (formula: `2 * CPU_CORES + 1`)
+2. **Database connections**: Configure connection pooling in both services
+3. **Redis memory**: Set `maxmemory` and eviction policies for Redis
+4. **Resource limits**: Add CPU and memory limits to services
+
+Example resource limits:
+
+```yaml
+python-service:
+  # ... other config
+  deploy:
+    resources:
+      limits:
+        cpus: '1.0'
+        memory: 512M
+      reservations:
+        cpus: '0.5'
+        memory: 256M
+```
+
+### Monitoring
+
+Monitor container health:
+
+```bash
+docker-compose ps
+docker stats
+```
+
+Check individual container health:
+
+```bash
+docker inspect --format='{{.State.Health.Status}}' <container_name>
+```
+
+## Troubleshooting
+
+### Services Won't Start
+
+1. Check if ports are already in use:
+   ```bash
+   lsof -i :3000
+   lsof -i :5000
+   lsof -i :5432
+   lsof -i :6379
+   ```
+
+2. View service logs:
+   ```bash
+   docker-compose logs
+   ```
+
+3. Check health status:
+   ```bash
+   docker-compose ps
+   ```
+
+### Database Connection Issues
+
+1. Verify PostgreSQL is healthy:
+   ```bash
+   docker-compose exec postgres pg_isready -U appuser
+   ```
+
+2. Check network connectivity:
+   ```bash
+   docker-compose exec python-service ping postgres
+   ```
+
+### Permission Issues
+
+If you encounter permission errors with volumes:
+
+```bash
+docker-compose down -v
+docker volume prune
+docker-compose up -d
+```
+
+## Next Steps
+
+- Configure [environment variables](/deployment/environment-variables) for your deployment
+- Set up monitoring and logging
+- Configure automated backups
+- Implement CI/CD pipelines

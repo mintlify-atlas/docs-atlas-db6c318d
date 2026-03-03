@@ -1,0 +1,326 @@
+---
+title: Authentication Errors
+description: Authentication-related incidents in the Python service including bcrypt compatibility issues and missing imports
+---
+
+This page documents authentication-related incidents in the ShopStack Python service, including common authentication failures, bcrypt library compatibility issues, and import errors.
+
+## Overview
+
+Authentication errors can prevent users from logging in or registering, causing critical service disruptions. The most common issues include:
+
+- Type mismatches between bcrypt library versions
+- Missing authentication middleware
+- Password hash encoding/decoding errors
+- JWT token generation failures
+
+## Incidents
+
+<Accordion title="INC-001: Login endpoint returns 500 after bcrypt upgrade">
+
+### Incident Details
+
+- **Severity**: P1 - Critical
+- **Service**: python-service
+- **Environment**: Staging
+- **Reported**: 2026-02-28T14:23:00Z
+- **Status**: Resolved
+
+### Problem
+
+After upgrading bcrypt from version 3.2.0 to 4.1.2, the `/api/auth/login` endpoint started returning 500 Internal Server Error for all login attempts, even with valid credentials. The endpoint was working correctly before the library upgrade.
+
+**Error Message:**
+```
+TypeError: a bytes-like object is required, not 'str' 
+in app/routes/auth.py line 42
+```
+
+### Root Cause
+
+The bcrypt library changed its API in version 4.0.0. The `checkpw()` function now requires the stored password hash to be in bytes format, but the application was storing password hashes as strings in the database and passing strings to `bcrypt.checkpw()`.
+
+**Location**: `app/routes/auth.py:53-56`
+
+### Problematic Code
+
+```python auth.py
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    user = User.query.filter_by(email=data["email"]).first()
+    
+    # This fails with bcrypt >= 4.0.0 when user.password_hash is a string
+    is_valid = bcrypt.checkpw(
+        data["password"].encode("utf-8"),
+        user.password_hash  # TypeError: expected bytes, got str
+    )
+```
+
+### Resolution
+
+Encode the stored password hash to bytes before passing it to `bcrypt.checkpw()`:
+
+```python auth.py
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    user = User.query.filter_by(email=data["email"]).first()
+    
+    # Convert password hash to bytes if it's stored as a string
+    is_valid = bcrypt.checkpw(
+        data["password"].encode("utf-8"),
+        user.password_hash.encode("utf-8")  # Ensure bytes type
+    )
+```
+
+### Prevention
+
+1. **Test library upgrades**: Always test dependency upgrades in a staging environment before production deployment
+2. **Review changelogs**: Check breaking changes in major version updates (3.x → 4.x)
+3. **Type consistency**: Store password hashes as bytes in the database to match bcrypt's expected input type
+4. **Add integration tests**: Create tests that verify authentication flows work end-to-end
+
+### Related Issues
+
+- Bcrypt 4.0.0 breaking changes: https://github.com/pyca/bcrypt/blob/main/CHANGELOG.rst
+- Similar issue in registration endpoint (also requires `.encode()` for hash storage)
+
+</Accordion>
+
+<Accordion title="INC-002: Database connection failure in staging/production">
+
+### Incident Details
+
+- **Severity**: P1 - Critical
+- **Service**: python-service
+- **Environment**: Staging
+- **Reported**: 2026-02-28T09:15:00Z
+- **Status**: Resolved
+
+### Problem
+
+The Python service failed to connect to PostgreSQL in staging and production environments. The application started successfully but crashed immediately when any database-backed endpoint was accessed. Local development worked fine, but deployed environments couldn't connect to the database.
+
+**Error Message:**
+```
+sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) 
+could not connect to server: Connection refused
+Is the server running on host "localhost" and accepting 
+TCP/IP connections on port 5432?
+```
+
+### Root Cause
+
+The development configuration used different environment variable names (`DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_HOST`) than the staging/production configurations (`DB_USER`, `DB_PASS`, `DB_HOST`). When the infrastructure team standardized environment variables to use the `DB_*` prefix, the development config still had hardcoded fallbacks to `localhost`, causing staging/production to fall back to incorrect defaults.
+
+**Location**: `app/config.py:11-32`
+
+### Problematic Code
+
+```python config.py
+class DevelopmentConfig(BaseConfig):
+    SQLALCHEMY_DATABASE_URI = (
+        f"postgresql://"
+        f"{os.environ.get('DATABASE_USER', 'appuser')}:"
+        f"{os.environ.get('DATABASE_PASSWORD', 'apppassword')}@"
+        f"localhost:"  # Hardcoded localhost!
+        f"{os.environ.get('DATABASE_PORT', '5432')}/"
+        f"{os.environ.get('DATABASE_NAME', 'ecommerce')}"
+    )
+
+class StagingConfig(BaseConfig):
+    SQLALCHEMY_DATABASE_URI = (
+        f"postgresql://"
+        f"{os.environ.get('DB_USER', 'appuser')}:"  # Different env var names
+        f"{os.environ.get('DB_PASS', 'apppassword')}@"
+        f"{os.environ.get('DB_HOST', 'localhost')}:"  # Falls back to localhost
+        f"{os.environ.get('DB_PORT', '5432')}/"
+        f"{os.environ.get('DB_NAME', 'ecommerce')}"
+    )
+```
+
+### Resolution
+
+Standardize environment variable names across all configurations and remove unsafe fallback defaults:
+
+```python config.py
+class DevelopmentConfig(BaseConfig):
+    SQLALCHEMY_DATABASE_URI = (
+        f"postgresql://"
+        f"{os.environ.get('DB_USER', 'appuser')}:"
+        f"{os.environ.get('DB_PASS', 'apppassword')}@"
+        f"{os.environ.get('DB_HOST', 'localhost')}:"
+        f"{os.environ.get('DB_PORT', '5432')}/"
+        f"{os.environ.get('DB_NAME', 'ecommerce')}"
+    )
+
+class StagingConfig(BaseConfig):
+    # Require DB_HOST in staging - no fallback to localhost
+    db_host = os.environ.get('DB_HOST')
+    if not db_host:
+        raise ValueError("DB_HOST environment variable is required for staging")
+    
+    SQLALCHEMY_DATABASE_URI = (
+        f"postgresql://"
+        f"{os.environ['DB_USER']}:"
+        f"{os.environ['DB_PASS']}@"
+        f"{db_host}:"
+        f"{os.environ.get('DB_PORT', '5432')}/"
+        f"{os.environ['DB_NAME']}"
+    )
+```
+
+### Prevention
+
+1. **Consistent naming**: Use the same environment variable names across all environments
+2. **Fail fast**: Don't use fallback defaults for critical configuration in production environments
+3. **Environment validation**: Add startup checks to validate required environment variables are set
+4. **Documentation**: Document all required environment variables in README or deployment docs
+5. **Configuration testing**: Test configuration loading in CI for each environment
+
+</Accordion>
+
+<Accordion title="INC-003: ImportError after Flask upgrade to 2.3.x">
+
+### Incident Details
+
+- **Severity**: P2 - High
+- **Service**: python-service
+- **Environment**: All
+- **Reported**: 2026-02-27T16:45:00Z
+- **Status**: Resolved
+
+### Problem
+
+After upgrading Flask from 2.2.x to 2.3.x for security patches, the application failed to start with an ImportError. The custom JSON encoder that handles datetime and Decimal serialization broke because Flask removed the `flask.json.JSONEncoder` class in version 2.3.
+
+**Error Message:**
+```
+ImportError: cannot import name 'JSONEncoder' from 'flask.json'
+(/usr/local/lib/python3.11/site-packages/flask/json/__init__.py)
+```
+
+### Root Cause
+
+Flask 2.3.0 removed the `flask.json.JSONEncoder` class as part of a refactoring to use Python's built-in `json` module more directly. The application's custom JSON encoder inherited from the removed class.
+
+**Location**: `app/__init__.py:6,15-23,34`
+
+### Problematic Code
+
+```python __init__.py
+from flask.json import JSONEncoder  # This import fails in Flask >= 2.3
+from datetime import datetime, date
+from decimal import Decimal
+
+class CustomJSONEncoder(JSONEncoder):
+    """Custom JSON encoder that handles datetime and Decimal types."""
+    
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+def create_app(config_name=None):
+    app = Flask(__name__)
+    app.json_encoder = CustomJSONEncoder  # Also deprecated
+```
+
+### Resolution
+
+Use Flask's new JSON provider interface introduced in Flask 2.2:
+
+```python __init__.py
+from flask.json.provider import DefaultJSONProvider
+from datetime import datetime, date
+from decimal import Decimal
+
+class CustomJSONProvider(DefaultJSONProvider):
+    """Custom JSON provider that handles datetime and Decimal types."""
+    
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+def create_app(config_name=None):
+    app = Flask(__name__)
+    
+    # Load configuration
+    from app.config import get_config
+    app.config.from_object(get_config(config_name))
+    
+    # Set custom JSON provider (Flask 2.2+)
+    app.json = CustomJSONProvider(app)
+```
+
+### Prevention
+
+1. **Read upgrade guides**: Review Flask's migration guide when upgrading major/minor versions
+2. **Check deprecation warnings**: Run application with deprecation warnings enabled during testing
+3. **Pin major versions**: Use version constraints like `Flask>=2.3,<3.0` to avoid surprise breaking changes
+4. **Test upgrades**: Run full test suite after any dependency upgrade
+5. **Gradual adoption**: Upgrade dependencies one at a time to isolate issues
+
+### Related Documentation
+
+- Flask 2.3 changelog: https://flask.palletsprojects.com/en/latest/changes/#version-2-3-0
+- Custom JSON provider guide: https://flask.palletsprojects.com/en/latest/api/#flask.json.provider.DefaultJSONProvider
+
+</Accordion>
+
+## Common Patterns
+
+### Password Hashing Best Practices
+
+```python
+import bcrypt
+
+# When creating a user (registration)
+password_hash = bcrypt.hashpw(
+    password.encode('utf-8'),
+    bcrypt.gensalt()
+).decode('utf-8')  # Store as string in database
+
+# When verifying a password (login)
+is_valid = bcrypt.checkpw(
+    password.encode('utf-8'),
+    stored_hash.encode('utf-8')  # Convert back to bytes
+)
+```
+
+### Environment Variable Best Practices
+
+```python
+import os
+
+class ProductionConfig:
+    # Required variables - fail if not set
+    DB_HOST = os.environ['DB_HOST']  # Raises KeyError if missing
+    DB_USER = os.environ['DB_USER']
+    DB_PASS = os.environ['DB_PASS']
+    
+    # Optional variables - safe defaults
+    DB_PORT = os.environ.get('DB_PORT', '5432')
+    DEBUG = os.environ.get('DEBUG', 'false').lower() == 'true'
+```
+
+## Quick Reference
+
+| Issue Type | Common Cause | Quick Fix |
+|------------|--------------|----------|
+| bcrypt TypeError | Library version mismatch | Add `.encode('utf-8')` to hash parameter |
+| Database connection fails | Wrong environment variables | Standardize variable names, validate on startup |
+| ImportError on Flask upgrade | Deprecated/removed API | Use new `DefaultJSONProvider` interface |
+| JWT token invalid | Wrong secret key | Verify `JWT_SECRET_KEY` is set correctly |
+
+## See Also
+
+- [Order Management Issues](/incidents/python/order-management)
+- [Payment Processing Issues](/incidents/python/payment-processing)
+- [Product Operations Issues](/incidents/python/product-operations)

@@ -1,0 +1,283 @@
+---
+title: 'Payments API'
+description: 'Payment calculation and checkout endpoints'
+---
+
+## Overview
+
+The Payments API provides endpoints for calculating order totals and processing payments. All payment endpoints require authentication.
+
+## POST /api/payments/calculate
+
+Calculate the total cost for a cart including tax and discounts.
+
+### Request
+
+**Method:** `POST`
+
+**Path:** `/api/payments/calculate`
+
+**Authentication:** JWT token required
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+- `Content-Type: application/json`
+
+**Body Parameters:**
+
+<ParamField path="subtotal" type="number" required>
+  Cart subtotal before tax and discounts
+</ParamField>
+
+<ParamField path="discount_code" type="string">
+  Optional discount code to apply
+</ParamField>
+
+### Response
+
+<ResponseField name="subtotal" type="number">
+  Original subtotal amount
+</ResponseField>
+
+<ResponseField name="discount_code" type="string">
+  Discount code applied (if any)
+</ResponseField>
+
+<ResponseField name="discount_amount" type="number">
+  Amount deducted from subtotal
+</ResponseField>
+
+<ResponseField name="discounted_subtotal" type="number">
+  Subtotal after discount applied
+</ResponseField>
+
+<ResponseField name="tax" type="number">
+  Tax amount calculated on the subtotal
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Final total amount (discounted_subtotal + tax)
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST http://localhost:5000/api/payments/calculate \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subtotal": 1299.99,
+    "discount_code": "SAVE10"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "subtotal": 1299.99,
+  "discount_code": "SAVE10",
+  "discount_amount": 129.99,
+  "discounted_subtotal": 1170.0,
+  "tax": 93.6,
+  "total": 1263.6
+}
+```
+
+### Without Discount Code
+
+```bash cURL
+curl -X POST http://localhost:5000/api/payments/calculate \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subtotal": 1299.99
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "subtotal": 1299.99,
+  "discount_code": null,
+  "discount_amount": 0,
+  "discounted_subtotal": 1299.99,
+  "tax": 104.0,
+  "total": 1403.99
+}
+```
+
+### Error Responses
+
+**400 Bad Request** - Missing required field:
+```json
+{
+  "error": "Missing required field: subtotal"
+}
+```
+
+**401 Unauthorized** - Missing or invalid token:
+```json
+{
+  "msg": "Missing Authorization Header"
+}
+```
+
+---
+
+## POST /api/payments/checkout
+
+Process payment for an existing order.
+
+### Request
+
+**Method:** `POST`
+
+**Path:** `/api/payments/checkout`
+
+**Authentication:** JWT token required
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+- `Content-Type: application/json`
+
+**Body Parameters:**
+
+<ParamField path="order_id" type="integer" required>
+  ID of the order to process payment for
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="order" type="object">
+  Updated order object with payment status
+  
+  <ResponseField name="order.id" type="integer">
+    Order ID
+  </ResponseField>
+  
+  <ResponseField name="order.user_id" type="integer">
+    User ID
+  </ResponseField>
+  
+  <ResponseField name="order.status" type="string">
+    Order status (updated to "paid")
+  </ResponseField>
+  
+  <ResponseField name="order.subtotal" type="number">
+    Order subtotal
+  </ResponseField>
+  
+  <ResponseField name="order.tax" type="number">
+    Tax amount
+  </ResponseField>
+  
+  <ResponseField name="order.discount_amount" type="number">
+    Discount amount
+  </ResponseField>
+  
+  <ResponseField name="order.total" type="number">
+    Total amount charged
+  </ResponseField>
+  
+  <ResponseField name="order.discount_code" type="string">
+    Discount code used
+  </ResponseField>
+  
+  <ResponseField name="order.created_at" type="datetime">
+    Order creation timestamp
+  </ResponseField>
+  
+  <ResponseField name="order.updated_at" type="datetime">
+    Last update timestamp
+  </ResponseField>
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST http://localhost:5000/api/payments/checkout \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_id": 1
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Payment processed successfully",
+  "order": {
+    "id": 1,
+    "user_id": 1,
+    "status": "paid",
+    "subtotal": 1299.99,
+    "tax": 104.0,
+    "discount_amount": 0.0,
+    "total": 1403.99,
+    "discount_code": null,
+    "created_at": "2024-01-15T10:00:00",
+    "updated_at": "2024-01-15T10:05:00"
+  }
+}
+```
+
+### Error Responses
+
+**400 Bad Request** - Missing order_id:
+```json
+{
+  "error": "Missing required field: order_id"
+}
+```
+
+**400 Bad Request** - Order already processed:
+```json
+{
+  "error": "Order is already paid"
+}
+```
+
+**401 Unauthorized** - Missing or invalid token:
+```json
+{
+  "msg": "Missing Authorization Header"
+}
+```
+
+**404 Not Found** - Order not found or doesn't belong to user:
+```json
+{
+  "error": "Order not found"
+}
+```
+
+## Payment Flow
+
+1. **Calculate Total**: Use `/api/payments/calculate` to preview the total cost with tax and any discount codes before creating an order
+
+2. **Create Order**: Use the Orders API to create an order with the desired items
+
+3. **Process Payment**: Use `/api/payments/checkout` with the order ID to complete the payment
+
+4. **Order Status**: The order status will change from `pending` to `paid` upon successful payment
+
+## Order Statuses
+
+- `pending` - Order created but not yet paid
+- `paid` - Payment processed successfully
+- `shipped` - Order has been shipped
+- `delivered` - Order delivered to customer
+- `cancelled` - Order cancelled
+
+## Tax Calculation
+
+The tax is calculated automatically by the payment service based on the subtotal. The exact tax rate depends on the implementation in the `payment_service` module.
+
+## Discount Codes
+
+Discount codes are validated and applied by the payment service. Invalid discount codes will be ignored, and no discount will be applied.

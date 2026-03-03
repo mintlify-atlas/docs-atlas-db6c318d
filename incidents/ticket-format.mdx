@@ -1,0 +1,484 @@
+---
+title: Incident Ticket Format
+description: Complete reference for the JSON structure and fields used in ShopStack incident tickets
+---
+
+## Ticket Structure
+
+Each incident ticket is a JSON file stored in the `incidents/` directory with a standardized structure. All fields provide critical information for investigating and resolving issues.
+
+## Complete Example
+
+Here's a complete incident ticket showing all fields:
+
+```json
+{
+  "id": "INC-001",
+  "title": "Server returns 500 error on POST /api/auth/login after latest deployment",
+  "severity": "P1 - Critical",
+  "service": "python-service",
+  "reported_by": "Frontend Team",
+  "environment": "staging",
+  "timestamp": "2026-02-28T14:23:00Z",
+  "description": "After the latest deployment to staging, users are unable to log in. The POST /api/auth/login endpoint returns a 500 Internal Server Error for all login attempts, even with valid credentials. This was working fine before the last merge to main.",
+  "steps_to_reproduce": [
+    "Send a POST request to /api/auth/login with valid credentials",
+    "Payload: {\"email\": \"user@example.com\", \"password\": \"correctpassword\"}",
+    "Receive 500 Internal Server Error instead of 200 with JWT token"
+  ],
+  "error_log": "TypeError: a bytes-like object is required, not 'str' in app/routes/auth.py line 42",
+  "expected_behavior": "Returns 200 with JWT token for valid credentials, 401 for invalid credentials",
+  "actual_behavior": "Returns 500 Internal Server Error for all requests to /api/auth/login",
+  "recent_changes": "Updated bcrypt library from 3.2.0 to 4.1.2 and refactored auth routes",
+  "tags": ["runtime-crash", "authentication", "blocking"]
+}
+```
+
+## Field Reference
+
+### id
+
+**Type**: String (required)
+
+**Format**: `INC-XXX` where XXX is a zero-padded number
+
+**Description**: Unique identifier for the incident. Use the numbering convention:
+- `INC-001` to `INC-099`: Python service incidents
+- `INC-101` to `INC-199`: Node.js service incidents
+
+**Example**:
+```json
+"id": "INC-001"
+```
+
+### title
+
+**Type**: String (required)
+
+**Description**: Concise summary of the issue. Should include:
+- The affected endpoint or feature
+- The symptom or error type
+- Context about when it occurs
+
+**Best Practices**:
+- Be specific (include endpoint names, error codes)
+- Keep under 100 characters
+- Front-load the most important information
+
+**Good Examples**:
+```json
+"title": "Server returns 500 error on POST /api/auth/login after latest deployment"
+"title": "Node.js server crashes with unhandled promise rejection on GET /api/users/:id"
+"title": "/api/orders endpoint response time increased from 200ms to 8s"
+```
+
+**Bad Examples**:
+```json
+"title": "Login broken"  // Too vague
+"title": "Error"  // No context
+"title": "There's a problem with the authentication system that started happening after we deployed the latest changes to production"  // Too verbose
+```
+
+### severity
+
+**Type**: String (required)
+
+**Description**: Priority level indicating urgency and impact.
+
+**Valid Values**:
+- `"P0 - Critical"` - Complete service outage or data loss
+- `"P1 - Critical"` - Core functionality broken, blocking users
+- `"P2 - High"` - Major feature degraded, workaround available
+- `"P3 - Medium"` - Minor issue, limited user impact
+
+**Example**:
+```json
+"severity": "P1 - Critical"
+```
+
+### service
+
+**Type**: String (required)
+
+**Description**: Which microservice is affected by this incident.
+
+**Valid Values**:
+- `"python-service"` - Python Flask API
+- `"node-service"` - Node.js Express API
+
+**Example**:
+```json
+"service": "python-service"
+```
+
+### reported_by
+
+**Type**: String (required)
+
+**Description**: Team or individual who reported the incident.
+
+**Common Values**:
+- `"Frontend Team"`
+- `"Backend Team"`
+- `"DevOps Team"`
+- `"Platform Team"`
+- `"Customer Support"`
+- `"QA Team"`
+
+**Example**:
+```json
+"reported_by": "Frontend Team"
+```
+
+### environment
+
+**Type**: String (required)
+
+**Description**: Environment where the issue occurs.
+
+**Valid Values**:
+- `"development"` - Local development
+- `"staging"` - Staging environment
+- `"production"` - Production environment
+
+**Example**:
+```json
+"environment": "staging"
+```
+
+### timestamp
+
+**Type**: String (required)
+
+**Format**: ISO 8601 datetime with timezone (UTC)
+
+**Description**: When the incident was first reported or observed.
+
+**Example**:
+```json
+"timestamp": "2026-02-28T14:23:00Z"
+```
+
+### description
+
+**Type**: String (required)
+
+**Description**: Detailed explanation of the issue including:
+- What is broken
+- When it started occurring
+- User impact
+- Any relevant context
+
+**Best Practices**:
+- Start with the user impact
+- Mention when the issue started
+- Include relevant context (deployment, config changes)
+- Be clear and concise
+
+**Example**:
+```json
+"description": "After the latest deployment to staging, users are unable to log in. The POST /api/auth/login endpoint returns a 500 Internal Server Error for all login attempts, even with valid credentials. This was working fine before the last merge to main."
+```
+
+### steps_to_reproduce
+
+**Type**: Array of strings (required)
+
+**Description**: Step-by-step instructions to reproduce the issue. Should be detailed enough that anyone can follow them and see the same behavior.
+
+**Best Practices**:
+- Number steps sequentially
+- Include exact API calls, payloads, or user actions
+- Specify what should happen at each step
+- Include sample data where relevant
+
+**Example**:
+```json
+"steps_to_reproduce": [
+  "Send a POST request to /api/auth/login with valid credentials",
+  "Payload: {\"email\": \"user@example.com\", \"password\": \"correctpassword\"}",
+  "Receive 500 Internal Server Error instead of 200 with JWT token"
+]
+```
+
+### error_log
+
+**Type**: String (required)
+
+**Description**: Actual error messages, stack traces, or log output from the system. Include:
+- Error type and message
+- Stack trace (especially the top frames)
+- File names and line numbers
+- Relevant log entries
+
+**Best Practices**:
+- Copy errors verbatim
+- Include stack traces
+- Note file paths and line numbers
+- If no error occurs, describe the symptom (e.g., "No errors — endpoint returns correct data but very slowly")
+
+**Example (with error)**:
+```json
+"error_log": "TypeError: a bytes-like object is required, not 'str' in app/routes/auth.py line 42"
+```
+
+**Example (no error, performance issue)**:
+```json
+"error_log": "No errors — endpoint returns correct data but very slowly. DB logs show hundreds of SELECT queries per single API call."
+```
+
+**Example (with stack trace)**:
+```json
+"error_log": "UnhandledPromiseRejectionWarning: Error: User not found\n    at UserService.getById (/app/src/services/userService.js:25:11)\n    at processTicksAndRejections (internal/process/task_queues.js:95:5)\nThis error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled."
+```
+
+### expected_behavior
+
+**Type**: String (required)
+
+**Description**: What should happen when the system is working correctly. Be specific about:
+- Expected response codes
+- Expected response format
+- Expected timing/performance
+- Expected side effects
+
+**Example**:
+```json
+"expected_behavior": "Returns 200 with JWT token for valid credentials, 401 for invalid credentials"
+```
+
+```json
+"expected_behavior": "Returns 404 JSON response: {\"error\": \"User not found\"} without crashing"
+```
+
+```json
+"expected_behavior": "Endpoint returns orders with items in under 500ms"
+```
+
+### actual_behavior
+
+**Type**: String (required)
+
+**Description**: What actually happens when the issue occurs. Be specific about:
+- Actual response codes
+- Actual response format
+- Actual timing/performance
+- Actual side effects
+
+**Example**:
+```json
+"actual_behavior": "Returns 500 Internal Server Error for all requests to /api/auth/login"
+```
+
+```json
+"actual_behavior": "Entire server process crashes on unhandled promise rejection"
+```
+
+```json
+"actual_behavior": "Endpoint takes 5-10 seconds and generates excessive database queries"
+```
+
+### recent_changes
+
+**Type**: String (required)
+
+**Description**: What changed before the issue appeared. Include:
+- Code changes (commits, PRs, refactors)
+- Dependency updates
+- Configuration changes
+- Infrastructure changes
+- Deployments
+
+**Best Practices**:
+- Be specific about what changed
+- Include version numbers for dependency updates
+- Mention relevant commits or PRs if known
+- If unknown, state "No recent changes known"
+
+**Example**:
+```json
+"recent_changes": "Updated bcrypt library from 3.2.0 to 4.1.2 and refactored auth routes"
+```
+
+```json
+"recent_changes": "Migrated user routes from callbacks to async/await"
+```
+
+```json
+"recent_changes": "Infrastructure team updated environment variable naming convention across all services"
+```
+
+### tags
+
+**Type**: Array of strings (required)
+
+**Description**: Categorization labels for filtering and analysis. Use consistent tag names to enable trend analysis.
+
+**Common Tag Categories**:
+
+**Issue Type**:
+- `"runtime-crash"` - Service crashes or exits
+- `"performance"` - Slow response times
+- `"data-corruption"` - Data integrity issues
+- `"security"` - Security vulnerabilities
+
+**Component**:
+- `"authentication"` - Login, registration, tokens
+- `"database"` - Database queries, connections
+- `"api"` - API endpoints
+- `"validation"` - Input validation
+
+**Root Cause**:
+- `"misconfiguration"` - Configuration issues
+- `"dependency"` - Third-party library issues
+- `"n+1-query"` - Database query inefficiency
+- `"async-error"` - Async/promise handling
+- `"race-condition"` - Timing-dependent bugs
+
+**Impact**:
+- `"blocking"` - Blocks user workflows
+- `"process-exit"` - Causes service to exit
+- `"data-loss"` - May cause data loss
+
+**Environment**:
+- `"environment"` - Environment-specific issues
+- `"production-only"` - Only occurs in production
+
+**Example**:
+```json
+"tags": ["runtime-crash", "authentication", "blocking"]
+```
+
+```json
+"tags": ["performance", "n+1-query", "database"]
+```
+
+```json
+"tags": ["misconfiguration", "database", "environment"]
+```
+
+## Creating a New Ticket
+
+Use this template to create new incident tickets:
+
+```json
+{
+  "id": "INC-XXX",
+  "title": "",
+  "severity": "",
+  "service": "",
+  "reported_by": "",
+  "environment": "",
+  "timestamp": "",
+  "description": "",
+  "steps_to_reproduce": [
+    ""
+  ],
+  "error_log": "",
+  "expected_behavior": "",
+  "actual_behavior": "",
+  "recent_changes": "",
+  "tags": []
+}
+```
+
+## Real-World Examples
+
+### Example 1: Runtime Crash (Node.js)
+
+```json
+{
+  "id": "INC-101",
+  "title": "Node.js server crashes with unhandled promise rejection on GET /api/users/:id",
+  "severity": "P1 - Critical",
+  "service": "node-service",
+  "reported_by": "Frontend Team",
+  "environment": "production",
+  "timestamp": "2026-02-28T13:00:00Z",
+  "description": "The Node.js service crashes intermittently when fetching user profiles. When a user ID that doesn't exist in the database is requested, the server process exits with an unhandled promise rejection instead of returning a 404 response. This causes downtime until the process restarts.",
+  "steps_to_reproduce": [
+    "Send GET /api/users/99999 (non-existent user ID)",
+    "Server process crashes",
+    "All concurrent requests fail until process restarts"
+  ],
+  "error_log": "UnhandledPromiseRejectionWarning: Error: User not found\n    at UserService.getById (/app/src/services/userService.js:25:11)\n    at processTicksAndRejections (internal/process/task_queues.js:95:5)\nThis error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled.",
+  "expected_behavior": "Returns 404 JSON response: {\"error\": \"User not found\"} without crashing",
+  "actual_behavior": "Entire server process crashes on unhandled promise rejection",
+  "recent_changes": "Migrated user routes from callbacks to async/await",
+  "tags": ["runtime-crash", "async-error", "process-exit"]
+}
+```
+
+### Example 2: Configuration Issue (Python)
+
+```json
+{
+  "id": "INC-002",
+  "title": "App fails to connect to database in staging environment",
+  "severity": "P1 - Critical",
+  "service": "python-service",
+  "reported_by": "DevOps Team",
+  "environment": "staging",
+  "timestamp": "2026-02-28T09:15:00Z",
+  "description": "The Python service cannot connect to PostgreSQL in the staging environment. The application starts but immediately crashes when any endpoint requiring database access is hit. The database is confirmed running and accessible from other services. This issue only occurs in staging/production — local development works fine.",
+  "steps_to_reproduce": [
+    "Deploy python-service to staging environment",
+    "Attempt to hit any database-backed endpoint (e.g., GET /api/products)",
+    "Observe connection refused error"
+  ],
+  "error_log": "sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) could not connect to server: Connection refused\n\tIs the server running on host \"localhost\" and accepting TCP/IP connections on port 5432?",
+  "expected_behavior": "Service connects to the staging PostgreSQL database configured via environment variables",
+  "actual_behavior": "Service always tries to connect to localhost:5432 regardless of environment variables",
+  "recent_changes": "Infrastructure team updated environment variable naming convention across all services",
+  "tags": ["misconfiguration", "database", "environment"]
+}
+```
+
+### Example 3: Performance Issue (Python)
+
+```json
+{
+  "id": "INC-005",
+  "title": "/api/orders endpoint response time increased from 200ms to 8s",
+  "severity": "P2 - High",
+  "service": "python-service",
+  "reported_by": "Platform Team",
+  "environment": "production",
+  "timestamp": "2026-02-28T08:00:00Z",
+  "description": "The GET /api/orders endpoint response time has degraded severely. Average response time went from ~200ms to over 8 seconds after the last release. The endpoint lists orders for a user including their order items. Database CPU utilization has spiked to 85% during peak hours.",
+  "steps_to_reproduce": [
+    "Create a user with 10+ orders, each having 3-5 items",
+    "Send GET /api/orders with the user's auth token",
+    "Observe response time > 5 seconds"
+  ],
+  "error_log": "No errors — endpoint returns correct data but very slowly. DB logs show hundreds of SELECT queries per single API call.",
+  "expected_behavior": "Endpoint returns orders with items in under 500ms",
+  "actual_behavior": "Endpoint takes 5-10 seconds and generates excessive database queries",
+  "recent_changes": "Refactored order listing to include order items in the response payload",
+  "tags": ["performance", "n+1-query", "database"]
+}
+```
+
+## Validation Checklist
+
+Before submitting an incident ticket, verify:
+
+- [ ] ID follows the numbering convention
+- [ ] Title is specific and concise
+- [ ] Severity matches the user impact
+- [ ] Service is correctly identified
+- [ ] Environment is specified
+- [ ] Timestamp is in ISO 8601 format
+- [ ] Description explains the issue clearly
+- [ ] Reproduction steps are detailed and complete
+- [ ] Error logs are included (or noted if none)
+- [ ] Expected behavior is clearly stated
+- [ ] Actual behavior is clearly stated
+- [ ] Recent changes are documented
+- [ ] Tags are appropriate and consistent
+
+## Next Steps
+
+- Review [Getting Started](/incidents/getting-started) for incident workflow and best practices
+- Browse existing incidents in `incidents/` directory for more examples
+- Set up templates or scripts to generate new tickets from this format

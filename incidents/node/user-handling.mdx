@@ -1,0 +1,219 @@
+---
+title: User Handling Issues
+description: Node.js service incidents related to user profile and user data operations
+---
+
+This page documents incidents related to user handling in the Node.js service, including async error handling and null safety issues.
+
+## Overview
+
+User handling incidents typically stem from:
+- Unhandled promise rejections in async operations
+- Missing null/undefined checks on optional fields
+- Improper error propagation in async/await code
+
+## Incidents
+
+<Accordion title="INC-101: Unhandled Promise Rejection on User Fetch">
+
+### Summary
+
+**Severity:** P1 - Critical  
+**Service:** node-service  
+**Date:** 2026-02-28  
+**Environment:** Production
+
+The Node.js service crashed when fetching non-existent user profiles due to an unhandled promise rejection. The server process exited instead of returning a 404 response.
+
+### Problem
+
+When requesting a user ID that doesn't exist in the database, the `userService.getById()` method threw an error that wasn't caught in the route handler. This caused the entire server process to crash with an unhandled promise rejection.
+
+**Error message:**
+```
+UnhandledPromiseRejectionWarning: Error: User not found
+    at UserService.getById (/app/src/services/userService.js:25:11)
+```
+
+### Root Cause
+
+During migration from callbacks to async/await, the route handler at `/api/users/:id` was not wrapped in a try-catch block:
+
+**Problematic code** (src/routes/users.js:9-12):
+```javascript
+router.get("/:id", authenticate, async (req, res) => {
+  const user = await userService.getById(req.params.id);
+  res.json({ user: user.toJSON() });
+});
+```
+
+The `userService.getById()` throws an error when a user is not found, but there's no error handling around this async operation.
+
+### Resolution
+
+Wrap the async operation in a try-catch block and return appropriate HTTP status codes:
+
+**Fixed code:**
+```javascript
+router.get("/:id", authenticate, async (req, res) => {
+  try {
+    const user = await userService.getById(req.params.id);
+    res.json({ user: user.toJSON() });
+  } catch (error) {
+    if (error.message === "User not found") {
+      return res.status(404).json({ error: "User not found" });
+    }
+    console.error("Get user error:", error);
+    res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+```
+
+### Prevention
+
+- Always wrap async route handlers in try-catch blocks
+- Use an async error handling middleware for Express routes
+- Consider using `express-async-errors` package to automatically catch async errors
+- Add process-level handlers for unhandled rejections as a safety net:
+
+```javascript
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit the process, but log for investigation
+});
+```
+
+</Accordion>
+
+<Accordion title="INC-107: Null Reference Error on User Profile">
+
+### Summary
+
+**Severity:** P1 - Critical  
+**Service:** node-service  
+**Date:** 2026-02-28  
+**Environment:** Production
+
+Server crashed with "Cannot read properties of undefined (reading 'avatar')" when fetching profiles of users who haven't completed onboarding. Affected approximately 30% of users who signed up but never completed their profile.
+
+### Problem
+
+The `formatUserResponse()` utility function accessed nested properties without checking if the parent object exists.
+
+**Error message:**
+```
+TypeError: Cannot read properties of undefined (reading 'avatar')
+    at formatUserResponse (/app/src/utils/formatters.js:15:42)
+```
+
+### Root Cause
+
+The formatter assumes `user.profile` always exists, but newly registered users have `profile` set to `null` or `undefined` by default.
+
+**Problematic code** (src/utils/formatters.js:4-14):
+```javascript
+function formatUserResponse(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    avatar: user.profile.avatar,  // Crashes if user.profile is null/undefined
+    bio: user.profile.bio,        // Crashes if user.profile is null/undefined
+    joinedAt: user.createdAt,
+  };
+}
+```
+
+### Resolution
+
+Add null safety checks and provide default values:
+
+**Fixed code:**
+```javascript
+function formatUserResponse(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    avatar: user.profile?.avatar || null,
+    bio: user.profile?.bio || null,
+    joinedAt: user.createdAt,
+  };
+}
+```
+
+**Alternative using destructuring with defaults:**
+```javascript
+function formatUserResponse(user) {
+  const profile = user.profile || {};
+  
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    avatar: profile.avatar || null,
+    bio: profile.bio || null,
+    joinedAt: user.createdAt,
+  };
+}
+```
+
+### Prevention
+
+- Use optional chaining (`?.`) when accessing nested properties
+- Provide sensible defaults for optional fields
+- Consider TypeScript for compile-time null safety checks
+- Add integration tests for users in various states (new, partial profile, complete profile)
+- Document which fields are nullable in your data models
+
+</Accordion>
+
+## Best Practices
+
+### Async Error Handling Pattern
+
+Always use try-catch with async/await:
+
+```javascript
+router.get("/endpoint", async (req, res) => {
+  try {
+    const result = await someAsyncOperation();
+    res.json({ result });
+  } catch (error) {
+    console.error("Operation failed:", error);
+    res.status(500).json({ error: "Operation failed" });
+  }
+});
+```
+
+### Null Safety Pattern
+
+Use optional chaining and nullish coalescing:
+
+```javascript
+// Safe property access
+const avatar = user.profile?.avatar ?? '/default-avatar.png';
+
+// Safe nested access
+const city = user.address?.city || 'Unknown';
+```
+
+### Error Handler Middleware
+
+Implement a centralized async error handler:
+
+```javascript
+// Wrapper function
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+// Usage
+router.get("/users/:id", asyncHandler(async (req, res) => {
+  const user = await userService.getById(req.params.id);
+  res.json({ user });
+}));
+```

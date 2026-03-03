@@ -1,0 +1,145 @@
+---
+title: Introduction
+description: Welcome to ShopStack Platform - A modern dual-microservice e-commerce API built with Python Flask and Node.js Express
+---
+
+## Welcome to ShopStack Platform
+
+ShopStack is a production-ready e-commerce platform built on a modern microservices architecture. It combines the strengths of two powerful tech stacks to deliver a robust, scalable API for building online stores.
+
+<CardGroup cols={2}>
+  <Card title="Python Service" icon="python" iconType="duotone">
+    Flask-based API handling orders, payments, and product management with SQLAlchemy ORM
+  </Card>
+  <Card title="Node.js Service" icon="node-js" iconType="duotone">
+    Express-based API managing users, products, and reporting with Sequelize ORM
+  </Card>
+  <Card title="Shared Database" icon="database" iconType="duotone">
+    PostgreSQL database with unified schema accessible by both services
+  </Card>
+  <Card title="Redis Cache" icon="bolt" iconType="duotone">
+    Redis for session management, caching, and cross-service communication
+  </Card>
+</CardGroup>
+
+## Why ShopStack?
+
+ShopStack demonstrates best practices for building microservices that work together seamlessly while maintaining independence.
+
+<CardGroup cols={2}>
+  <Card title="Dual Runtime Flexibility" icon="code">
+    Leverage Python for complex calculations and data processing, Node.js for high-concurrency user operations
+  </Card>
+  <Card title="RESTful API Design" icon="link">
+    Clean, consistent endpoints with JWT authentication and comprehensive error handling
+  </Card>
+  <Card title="Docker-Ready" icon="docker">
+    Full Docker Compose setup with health checks for production deployment
+  </Card>
+  <Card title="Test Coverage" icon="check-double">
+    Complete test suites using pytest and Jest with in-memory databases
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+Both services share a common domain model covering users, products, orders, and payments, but handle different aspects of the business logic:
+
+| Service | Tech Stack | Port | Responsibilities |
+|---------|-----------|------|------------------|
+| **Python Service** | Flask, SQLAlchemy, Flask-JWT-Extended | 5000 | Authentication, Product CRUD, Order Management, Payment Processing |
+| **Node.js Service** | Express, Sequelize, jsonwebtoken | 3000 | User Profiles, Product Search, Sales Reporting, Analytics |
+
+<Note>
+  Both services connect to a shared PostgreSQL database in production. For local development and testing, each service uses an in-memory SQLite database for isolation.
+</Note>
+
+## Key Features
+
+### Authentication & Authorization
+- JWT-based authentication with bcrypt password hashing
+- Role-based access control (customer, admin)
+- Token refresh and validation across services
+
+### Product Management
+- Full CRUD operations for products
+- Category-based organization and filtering
+- Advanced search capabilities
+- Stock tracking and management
+
+### Order Processing
+- Multi-item order creation
+- Order status tracking
+- User order history
+- Subtotal and tax calculations
+
+### Payment Processing
+- Dynamic tax calculation based on order total
+- Discount code support
+- Payment validation and processing
+- Order checkout workflow
+
+### Reporting & Analytics
+- Sales reports with date range filtering
+- User activity tracking
+- Product performance metrics
+
+## Technology Stack
+
+<AccordionGroup>
+  <Accordion title="Python Service Dependencies">
+    - **Flask** 2.3.0+ - Web framework
+    - **Flask-SQLAlchemy** 3.1.1 - ORM and database toolkit
+    - **Flask-JWT-Extended** 4.6.0 - JWT authentication
+    - **Flask-CORS** 4.0.0 - Cross-origin resource sharing
+    - **bcrypt** 4.1.2 - Password hashing
+    - **psycopg2-binary** 2.9.9 - PostgreSQL adapter
+    - **Redis** 5.0.1 - Caching and sessions
+    - **pytest** 7.4.3 - Testing framework
+  </Accordion>
+  
+  <Accordion title="Node.js Service Dependencies">
+    - **Express** 4.18.2 - Web framework
+    - **Sequelize** 6.35.0 - ORM for PostgreSQL
+    - **jsonwebtoken** 9.0.2 - JWT authentication
+    - **bcryptjs** 2.4.3 - Password hashing
+    - **express-validator** 7.0.1 - Input validation
+    - **pg** 8.11.3 - PostgreSQL client
+    - **uuid** 9.0.0 - Unique identifier generation
+    - **Jest** 29.7.0 - Testing framework
+  </Accordion>
+  
+  <Accordion title="Infrastructure">
+    - **PostgreSQL** 15 - Primary database
+    - **Redis** 7 - Cache and session store
+    - **Docker** & **Docker Compose** - Containerization
+    - **GitHub Actions** - CI/CD pipeline
+  </Accordion>
+</AccordionGroup>
+
+## Quick Start
+
+Ready to get started? Follow our [quickstart guide](/quickstart) to set up both services in minutes.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get both services running locally with step-by-step instructions
+  </Card>
+  <Card title="Architecture Deep Dive" icon="sitemap" href="/architecture">
+    Learn about the microservice design, database schema, and communication patterns
+  </Card>
+</CardGroup>
+
+## What's Next?
+
+Explore the platform capabilities:
+
+- **Authentication** - Set up user registration and login with JWT tokens
+- **Products API** - Create, search, and manage product catalogs
+- **Orders & Payments** - Process orders with tax calculations and payment validation
+- **User Management** - Handle user profiles and permissions
+- **Reporting** - Generate sales reports and analytics
+
+<Info>
+  All API endpoints support JSON request/response format and include comprehensive error handling with descriptive messages.
+</Info>

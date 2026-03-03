@@ -1,0 +1,297 @@
+---
+title: 'Authentication API'
+description: 'User registration, login, and authentication endpoints'
+---
+
+## Overview
+
+The Authentication API provides endpoints for user registration, login, and retrieving the current user's information. All authentication uses JWT (JSON Web Tokens) for secure session management.
+
+## POST /api/auth/register
+
+Register a new user account.
+
+### Request
+
+**Method:** `POST`
+
+**Path:** `/api/auth/register`
+
+**Authentication:** None required
+
+**Headers:**
+- `Content-Type: application/json`
+
+**Body Parameters:**
+
+<ParamField path="email" type="string" required>
+  User's email address. Must be unique.
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  User's password. Will be hashed using bcrypt.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  User's full name.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  User object containing user details
+  
+  <ResponseField name="user.id" type="integer">
+    User's unique identifier
+  </ResponseField>
+  
+  <ResponseField name="user.email" type="string">
+    User's email address
+  </ResponseField>
+  
+  <ResponseField name="user.name" type="string">
+    User's full name
+  </ResponseField>
+  
+  <ResponseField name="user.role" type="string">
+    User's role (default: "customer")
+  </ResponseField>
+  
+  <ResponseField name="user.created_at" type="datetime">
+    Account creation timestamp
+  </ResponseField>
+  
+  <ResponseField name="user.updated_at" type="datetime">
+    Last update timestamp
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="access_token" type="string">
+  JWT access token for authenticated requests
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST http://localhost:5000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john.doe@example.com",
+    "password": "securePassword123",
+    "name": "John Doe"
+  }'
+```
+
+**Response (201 Created):**
+```json
+{
+  "message": "User registered successfully",
+  "user": {
+    "id": 1,
+    "email": "john.doe@example.com",
+    "name": "John Doe",
+    "role": "customer",
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00"
+  },
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Error Responses
+
+**400 Bad Request** - Missing required fields:
+```json
+{
+  "error": "Missing required fields: email, password, name"
+}
+```
+
+**409 Conflict** - Email already registered:
+```json
+{
+  "error": "Email already registered"
+}
+```
+
+---
+
+## POST /api/auth/login
+
+Authenticate an existing user.
+
+### Request
+
+**Method:** `POST`
+
+**Path:** `/api/auth/login`
+
+**Authentication:** None required
+
+**Headers:**
+- `Content-Type: application/json`
+
+**Body Parameters:**
+
+<ParamField path="email" type="string" required>
+  User's registered email address
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  User's password
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  User object containing user details (same structure as registration)
+</ResponseField>
+
+<ResponseField name="access_token" type="string">
+  JWT access token for authenticated requests
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john.doe@example.com",
+    "password": "securePassword123"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Login successful",
+  "user": {
+    "id": 1,
+    "email": "john.doe@example.com",
+    "name": "John Doe",
+    "role": "customer",
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00"
+  },
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Error Responses
+
+**400 Bad Request** - Missing required fields:
+```json
+{
+  "error": "Missing required fields: email, password"
+}
+```
+
+**401 Unauthorized** - Invalid credentials:
+```json
+{
+  "error": "Invalid email or password"
+}
+```
+
+---
+
+## GET /api/auth/me
+
+Get the current authenticated user's information.
+
+### Request
+
+**Method:** `GET`
+
+**Path:** `/api/auth/me`
+
+**Authentication:** JWT token required
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+
+### Response
+
+<ResponseField name="user" type="object">
+  User object containing current user's details
+  
+  <ResponseField name="user.id" type="integer">
+    User's unique identifier
+  </ResponseField>
+  
+  <ResponseField name="user.email" type="string">
+    User's email address
+  </ResponseField>
+  
+  <ResponseField name="user.name" type="string">
+    User's full name
+  </ResponseField>
+  
+  <ResponseField name="user.role" type="string">
+    User's role
+  </ResponseField>
+  
+  <ResponseField name="user.created_at" type="datetime">
+    Account creation timestamp
+  </ResponseField>
+  
+  <ResponseField name="user.updated_at" type="datetime">
+    Last update timestamp
+  </ResponseField>
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET http://localhost:5000/api/auth/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+**Response (200 OK):**
+```json
+{
+  "user": {
+    "id": 1,
+    "email": "john.doe@example.com",
+    "name": "John Doe",
+    "role": "customer",
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00"
+  }
+}
+```
+
+### Error Responses
+
+**401 Unauthorized** - Missing or invalid token:
+```json
+{
+  "msg": "Missing Authorization Header"
+}
+```
+
+**404 Not Found** - User not found:
+```json
+{
+  "error": "User not found"
+}
+```
+
+## Authentication Flow
+
+1. **Register** a new account using `/api/auth/register` or **login** with existing credentials using `/api/auth/login`
+2. Save the `access_token` from the response
+3. Include the token in the `Authorization` header for all protected endpoints:
+   ```
+   Authorization: Bearer <access_token>
+   ```
+4. Use `/api/auth/me` to verify the token and retrieve current user information

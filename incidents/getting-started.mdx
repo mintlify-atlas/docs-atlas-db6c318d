@@ -1,0 +1,201 @@
+---
+title: Getting Started with Incident Tracking
+description: Learn how to use the ShopStack incident tracking system to report, track, and resolve issues effectively
+---
+
+## Introduction
+
+The ShopStack Platform incident tracking system uses structured JSON tickets to document, track, and resolve issues across all microservices. Each incident is stored as a JSON file in the `incidents/` directory, providing a clear audit trail and standardized format for issue resolution.
+
+## Incident Numbering Convention
+
+Incidents are assigned unique identifiers based on the service:
+
+- **INC-001 to INC-099**: Python service incidents
+- **INC-101 to INC-199**: Node.js service incidents
+
+This convention makes it easy to identify which service an incident affects at a glance.
+
+## Severity Levels
+
+Incidents are classified by severity to prioritize resolution efforts:
+
+| Severity | Description | Response Time |
+|----------|-------------|---------------|
+| **P0 - Critical** | Complete service outage, data loss | Immediate |
+| **P1 - Critical** | Core functionality broken, blocking users | < 1 hour |
+| **P2 - High** | Major feature degraded, workaround available | < 4 hours |
+| **P3 - Medium** | Minor issue, limited user impact | < 24 hours |
+
+## Incident Workflow
+
+### 1. Create an Incident Ticket
+
+When an issue is discovered:
+
+1. Create a new JSON file in `incidents/` using the next available ID
+2. Fill in all required fields (see [Ticket Format](/incidents/ticket-format))
+3. Include detailed reproduction steps and error logs
+4. Tag appropriately for categorization
+
+### 2. Investigation
+
+1. Review the incident details and error logs
+2. Reproduce the issue using the provided steps
+3. Check recent changes that may have introduced the bug
+4. Examine related code paths and dependencies
+5. Document findings in the investigation notes
+
+### 3. Resolution
+
+1. Identify the root cause
+2. Implement a fix with tests to prevent regression
+3. Verify the fix resolves the issue in all environments
+4. Update the incident ticket with resolution details
+
+### 4. Post-Mortem (P0/P1 only)
+
+For critical incidents:
+
+1. Document timeline of events
+2. Identify root cause and contributing factors
+3. List action items to prevent recurrence
+4. Share learnings with the team
+
+## Common Issue Categories
+
+### Runtime Crashes
+
+Issues that cause the service to crash or become unresponsive.
+
+**Example**: INC-101 - Unhandled promise rejection crashes Node.js server
+
+```json
+{
+  "id": "INC-101",
+  "title": "Node.js server crashes with unhandled promise rejection on GET /api/users/:id",
+  "severity": "P1 - Critical",
+  "service": "node-service",
+  "tags": ["runtime-crash", "async-error", "process-exit"]
+}
+```
+
+### Authentication Issues
+
+Problems with user login, registration, or token validation.
+
+**Example**: INC-001 - Login endpoint returns 500 error
+
+```json
+{
+  "id": "INC-001",
+  "title": "Server returns 500 error on POST /api/auth/login after latest deployment",
+  "severity": "P1 - Critical",
+  "service": "python-service",
+  "tags": ["runtime-crash", "authentication", "blocking"]
+}
+```
+
+### Configuration Issues
+
+Misconfigurations that prevent services from running properly.
+
+**Example**: INC-002 - Database connection failure in staging
+
+```json
+{
+  "id": "INC-002",
+  "title": "App fails to connect to database in staging environment",
+  "severity": "P1 - Critical",
+  "service": "python-service",
+  "tags": ["misconfiguration", "database", "environment"]
+}
+```
+
+### Performance Issues
+
+Degradation in response times or resource consumption.
+
+**Example**: INC-005 - Slow orders endpoint
+
+```json
+{
+  "id": "INC-005",
+  "title": "/api/orders endpoint response time increased from 200ms to 8s",
+  "severity": "P2 - High",
+  "service": "python-service",
+  "tags": ["performance", "n+1-query", "database"]
+}
+```
+
+## Best Practices
+
+### Writing Good Incident Tickets
+
+**DO:**
+- Be specific in the title (include endpoint, error type, or symptom)
+- Provide complete reproduction steps that anyone can follow
+- Include actual error messages and stack traces
+- Document what changed recently (deployment, config, dependency)
+- Use clear expected vs. actual behavior descriptions
+
+**DON'T:**
+- Use vague titles like "Login broken" or "API not working"
+- Assume the reader knows the context
+- Skip reproduction steps
+- Omit error logs or stack traces
+- Forget to specify the environment
+
+### Investigation Tips
+
+1. **Start with recent changes** - Most bugs are introduced by recent code or config changes
+2. **Check the error logs first** - Error messages often point directly to the issue
+3. **Reproduce locally** - Always verify you can reproduce before investigating
+4. **Look for patterns** - Similar incidents may share root causes
+5. **Check dependencies** - Library upgrades can introduce breaking changes
+
+### Resolution Guidelines
+
+1. **Write tests first** - Add a failing test that reproduces the bug
+2. **Fix the root cause** - Don't just patch symptoms
+3. **Test in all environments** - Verify the fix works in dev, staging, and production
+4. **Document the fix** - Update the incident ticket with what was changed and why
+5. **Consider prevention** - Add monitoring, validation, or safeguards to prevent recurrence
+
+## Using Incident Data
+
+### Identify Trends
+
+Review incident tags to identify recurring issues:
+
+```bash
+# Count incidents by tag
+grep -r '"tags"' incidents/ | grep -o '"[^"]*"' | sort | uniq -c | sort -rn
+```
+
+### Track Service Health
+
+Monitor incident counts and severity by service:
+
+```bash
+# List all P1 incidents
+grep -l '"P1 - Critical"' incidents/*.json
+
+# Count incidents by service
+grep -h '"service"' incidents/*.json | sort | uniq -c
+```
+
+### Improve Quality
+
+Use incident data to:
+- Identify areas needing more tests
+- Find code that changes frequently and breaks often
+- Prioritize technical debt reduction
+- Improve deployment and rollback processes
+
+## Next Steps
+
+- Review the [Ticket Format](/incidents/ticket-format) documentation for detailed field descriptions
+- Browse existing incidents in `incidents/` to see real examples
+- Set up monitoring to catch issues before users report them
+- Establish incident response runbooks for common scenarios

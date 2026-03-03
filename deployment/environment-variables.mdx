@@ -1,0 +1,488 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables in ShopStack Platform
+---
+
+## Overview
+
+ShopStack Platform uses environment variables to configure both the Python and Node.js services. This page documents all available variables with their default values and usage.
+
+## Python Service Variables
+
+The Python service uses Flask and supports multiple configuration environments.
+
+### Flask Environment
+
+<ParamField path="FLASK_ENV" type="string" default="development">
+  Flask environment mode. Controls which configuration class is loaded.
+  
+  **Options**:
+  - `development` - Development mode with debug enabled
+  - `staging` - Staging mode with debug disabled
+  - `production` - Production mode with debug disabled
+  - `testing` - Testing mode with in-memory SQLite database
+  
+  **Example**:
+  ```bash
+  FLASK_ENV=staging
+  ```
+</ParamField>
+
+### Security
+
+<ParamField path="SECRET_KEY" type="string" default="dev-secret-key">
+  Secret key for Flask session encryption and JWT token signing. Used for both `SECRET_KEY` and `JWT_SECRET_KEY` in the application.
+  
+  <Warning>
+    Always use a strong, randomly generated secret in production. Never use the default value.
+  </Warning>
+  
+  **Example**:
+  ```bash
+  SECRET_KEY=supersecretkey123
+  ```
+  
+  **Generate a secure key**:
+  ```bash
+  python -c "import secrets; print(secrets.token_hex(32))"
+  ```
+</ParamField>
+
+### Database Configuration (Development)
+
+Used when `FLASK_ENV=development`:
+
+<ParamField path="DATABASE_USER" type="string" default="appuser">
+  PostgreSQL username for database connection in development mode.
+  
+  **Example**:
+  ```bash
+  DATABASE_USER=appuser
+  ```
+</ParamField>
+
+<ParamField path="DATABASE_PASSWORD" type="string" default="apppassword">
+  PostgreSQL password for database connection in development mode.
+  
+  **Example**:
+  ```bash
+  DATABASE_PASSWORD=apppassword
+  ```
+</ParamField>
+
+<ParamField path="DATABASE_PORT" type="string" default="5432">
+  PostgreSQL port for database connection in development mode.
+  
+  **Example**:
+  ```bash
+  DATABASE_PORT=5432
+  ```
+</ParamField>
+
+<ParamField path="DATABASE_NAME" type="string" default="ecommerce">
+  PostgreSQL database name in development mode.
+  
+  **Example**:
+  ```bash
+  DATABASE_NAME=ecommerce
+  ```
+</ParamField>
+
+### Database Configuration (Staging/Production)
+
+Used when `FLASK_ENV=staging` or `FLASK_ENV=production`:
+
+<ParamField path="DB_USER" type="string" default="appuser">
+  PostgreSQL username for database connection in staging/production mode.
+  
+  **Example**:
+  ```bash
+  DB_USER=appuser
+  ```
+</ParamField>
+
+<ParamField path="DB_PASS" type="string" default="apppassword">
+  PostgreSQL password for database connection in staging/production mode.
+  
+  **Example**:
+  ```bash
+  DB_PASS=apppassword
+  ```
+</ParamField>
+
+<ParamField path="DB_HOST" type="string" default="localhost">
+  PostgreSQL host for database connection in staging/production mode.
+  
+  **Example**:
+  ```bash
+  DB_HOST=postgres
+  ```
+</ParamField>
+
+<ParamField path="DB_PORT" type="string" default="5432">
+  PostgreSQL port for database connection in staging/production mode.
+  
+  **Example**:
+  ```bash
+  DB_PORT=5432
+  ```
+</ParamField>
+
+<ParamField path="DB_NAME" type="string" default="ecommerce">
+  PostgreSQL database name in staging/production mode.
+  
+  **Example**:
+  ```bash
+  DB_NAME=ecommerce
+  ```
+</ParamField>
+
+### Database Host Configuration
+
+<ParamField path="DATABASE_HOST" type="string" default="localhost">
+  PostgreSQL host for database connection. Used in Docker Compose to reference the postgres service.
+  
+  **Example**:
+  ```bash
+  DATABASE_HOST=postgres
+  ```
+</ParamField>
+
+### Caching
+
+<ParamField path="REDIS_URL" type="string" default="redis://localhost:6379/0">
+  Redis connection URL for caching. The Python service uses Redis database 0.
+  
+  **Format**: `redis://[host]:[port]/[db]`
+  
+  **Example**:
+  ```bash
+  REDIS_URL=redis://redis:6379/0
+  ```
+</ParamField>
+
+### Python Service Configuration Summary
+
+The Python service builds its database connection string based on the `FLASK_ENV` setting:
+
+**Development** (`FLASK_ENV=development`):
+```
+postgresql://[DATABASE_USER]:[DATABASE_PASSWORD]@localhost:[DATABASE_PORT]/[DATABASE_NAME]
+```
+
+**Staging/Production** (`FLASK_ENV=staging` or `FLASK_ENV=production`):
+```
+postgresql://[DB_USER]:[DB_PASS]@[DB_HOST]:[DB_PORT]/[DB_NAME]
+```
+
+**Testing** (`FLASK_ENV=testing`):
+```
+sqlite:///:memory:
+```
+
+## Node.js Service Variables
+
+The Node.js service uses environment variables for database, JWT, and server configuration.
+
+### Server Configuration
+
+<ParamField path="PORT" type="string" default="3000">
+  Port number for the Node.js server to listen on.
+  
+  **Example**:
+  ```bash
+  PORT=3000
+  ```
+</ParamField>
+
+<ParamField path="NODE_ENV" type="string" default="development">
+  Node.js environment mode. Controls logging and other environment-specific behavior.
+  
+  **Options**:
+  - `development` - Enables SQL query logging
+  - `production` - Disables SQL query logging
+  
+  **Example**:
+  ```bash
+  NODE_ENV=production
+  ```
+</ParamField>
+
+### Database Configuration
+
+<ParamField path="DB_HOST" type="string" default="localhost">
+  PostgreSQL host for database connection.
+  
+  **Example**:
+  ```bash
+  DB_HOST=postgres
+  ```
+</ParamField>
+
+<ParamField path="DB_PORT" type="string" default="5432">
+  PostgreSQL port for database connection.
+  
+  **Example**:
+  ```bash
+  DB_PORT=5432
+  ```
+</ParamField>
+
+<ParamField path="DB_USER" type="string" default="appuser">
+  PostgreSQL username for database connection.
+  
+  **Example**:
+  ```bash
+  DB_USER=appuser
+  ```
+</ParamField>
+
+<ParamField path="DB_PASSWORD" type="string" default="apppassword">
+  PostgreSQL password for database connection.
+  
+  **Example**:
+  ```bash
+  DB_PASSWORD=apppassword
+  ```
+</ParamField>
+
+<ParamField path="DB_NAME" type="string" default="ecommerce">
+  PostgreSQL database name.
+  
+  **Example**:
+  ```bash
+  DB_NAME=ecommerce
+  ```
+</ParamField>
+
+### Security
+
+<ParamField path="JWT_SECRET" type="string" default="dev-secret-key">
+  Secret key for JWT token signing and verification. JWT tokens expire after 24 hours.
+  
+  <Warning>
+    Always use a strong, randomly generated secret in production. Never use the default value.
+  </Warning>
+  
+  **Example**:
+  ```bash
+  JWT_SECRET=anothersecretkey456
+  ```
+  
+  **Generate a secure key**:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
+</ParamField>
+
+### Caching
+
+<ParamField path="REDIS_URL" type="string" default="redis://localhost:6379/0">
+  Redis connection URL for caching. The Node.js service uses Redis database 1.
+  
+  **Format**: `redis://[host]:[port]/[db]`
+  
+  **Example**:
+  ```bash
+  REDIS_URL=redis://redis:6379/1
+  ```
+</ParamField>
+
+## Docker Compose Environment
+
+When using Docker Compose, environment variables are set in the `docker-compose.yml` file:
+
+### Python Service Docker Environment
+
+```yaml
+python-service:
+  environment:
+    - DATABASE_HOST=postgres
+    - DATABASE_PORT=5432
+    - DATABASE_USER=appuser
+    - DATABASE_PASSWORD=apppassword
+    - DATABASE_NAME=ecommerce
+    - REDIS_URL=redis://redis:6379/0
+    - FLASK_ENV=staging
+    - SECRET_KEY=supersecretkey123
+```
+
+### Node Service Docker Environment
+
+```yaml
+node-service:
+  environment:
+    - DB_HOST=postgres
+    - DB_PORT=5432
+    - DB_USER=appuser
+    - DB_PASSWORD=apppassword
+    - DB_NAME=ecommerce
+    - REDIS_URL=redis://redis:6379/1
+    - NODE_ENV=production
+    - JWT_SECRET=anothersecretkey456
+```
+
+## Using .env Files
+
+For local development, create a `.env` file in each service directory:
+
+### Python Service .env
+
+```bash
+# python-service/.env
+FLASK_ENV=development
+SECRET_KEY=dev-secret-key
+DATABASE_USER=appuser
+DATABASE_PASSWORD=apppassword
+DATABASE_PORT=5432
+DATABASE_NAME=ecommerce
+REDIS_URL=redis://localhost:6379/0
+```
+
+### Node Service .env
+
+```bash
+# node-service/.env
+NODE_ENV=development
+PORT=3000
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=appuser
+DB_PASSWORD=apppassword
+DB_NAME=ecommerce
+JWT_SECRET=dev-secret-key
+REDIS_URL=redis://localhost:6379/1
+```
+
+<Warning>
+  Never commit `.env` files to version control. Add them to `.gitignore`.
+</Warning>
+
+## Environment-Specific Configuration
+
+### Development
+
+Optimal settings for local development:
+
+```bash
+# Python Service
+FLASK_ENV=development
+SECRET_KEY=dev-secret-key
+DATABASE_USER=appuser
+DATABASE_PASSWORD=apppassword
+DATABASE_PORT=5432
+DATABASE_NAME=ecommerce
+
+# Node Service
+NODE_ENV=development
+JWT_SECRET=dev-secret-key
+```
+
+### Staging
+
+Settings for staging environment:
+
+```bash
+# Python Service
+FLASK_ENV=staging
+SECRET_KEY=<strong-secret-key>
+DB_HOST=postgres
+DB_USER=appuser
+DB_PASS=<strong-password>
+DB_NAME=ecommerce
+
+# Node Service
+NODE_ENV=production
+JWT_SECRET=<strong-secret-key>
+DB_HOST=postgres
+DB_PASSWORD=<strong-password>
+```
+
+### Production
+
+Settings for production environment:
+
+```bash
+# Python Service
+FLASK_ENV=production
+SECRET_KEY=<strong-secret-key>
+DB_HOST=<production-db-host>
+DB_USER=<production-user>
+DB_PASS=<strong-password>
+DB_NAME=ecommerce
+REDIS_URL=redis://<production-redis-host>:6379/0
+
+# Node Service
+NODE_ENV=production
+JWT_SECRET=<strong-secret-key>
+DB_HOST=<production-db-host>
+DB_USER=<production-user>
+DB_PASSWORD=<strong-password>
+DB_NAME=ecommerce
+REDIS_URL=redis://<production-redis-host>:6379/1
+```
+
+## Security Best Practices
+
+### Secret Management
+
+1. **Never use default secrets in production**
+2. **Generate strong random secrets**:
+   ```bash
+   # Python
+   python -c "import secrets; print(secrets.token_hex(32))"
+   
+   # Node.js
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+3. **Use secret management tools**: AWS Secrets Manager, HashiCorp Vault, etc.
+4. **Rotate secrets regularly**
+
+### Database Credentials
+
+1. **Use strong passwords**: Minimum 16 characters with mixed case, numbers, and symbols
+2. **Restrict database access**: Only allow connections from application services
+3. **Use SSL/TLS**: Enable SSL connections for production databases
+4. **Principle of least privilege**: Grant only necessary permissions
+
+### Environment Isolation
+
+1. **Separate credentials per environment**: Different secrets for dev, staging, and production
+2. **Network isolation**: Use private networks for database and Redis
+3. **Access control**: Implement proper firewall rules and security groups
+
+## Troubleshooting
+
+### Database Connection Issues
+
+If services can't connect to the database:
+
+1. **Verify environment variables**: Check that `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` are correct
+2. **Check network connectivity**: Ensure services can reach the database host
+3. **Verify credentials**: Test database login manually:
+   ```bash
+   psql -h localhost -U appuser -d ecommerce
+   ```
+
+### Configuration Mismatches
+
+For Python service configuration issues:
+
+- **Development mode**: Uses `DATABASE_*` variables
+- **Staging/Production mode**: Uses `DB_*` variables (except `DATABASE_HOST`)
+- Ensure you're setting the correct variables for your `FLASK_ENV`
+
+### Redis Connection Issues
+
+If caching isn't working:
+
+1. **Check Redis URL format**: Should be `redis://host:port/db`
+2. **Verify Redis is running**: `redis-cli ping` should return `PONG`
+3. **Check database separation**: Python uses DB 0, Node uses DB 1
+
+## Next Steps
+
+- Learn about [Docker deployment](/deployment/docker)
+- Review the [Python API documentation](/api/python/authentication)
+- Review the [Node API documentation](/api/node/authentication)
+- Set up monitoring and logging for your deployment

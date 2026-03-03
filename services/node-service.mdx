@@ -1,0 +1,836 @@
+---
+title: "Node.js Express Service"
+description: "Complete guide to the Node.js Express microservice for authentication, users, products, and reports"
+---
+
+## Overview
+
+The Node.js Express service is a RESTful API microservice that provides user management, product catalog, authentication, and reporting functionality. It uses Express.js with Sequelize ORM and PostgreSQL for production environments.
+
+## Technology Stack
+
+- **Framework**: Express.js 4.18+
+- **ORM**: Sequelize 6.35
+- **Database**: PostgreSQL (SQLite for testing)
+- **Authentication**: JWT (jsonwebtoken)
+- **Password Hashing**: bcryptjs
+- **Validation**: express-validator
+- **CORS**: cors middleware
+- **Testing**: Jest with Supertest
+
+## Setup and Installation
+
+<Steps>
+  <Step title="Clone and navigate to the service">
+    ```bash
+    cd node-service
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    <CodeGroup>
+      ```bash npm
+      npm install
+      ```
+
+      ```bash yarn
+      yarn install
+      ```
+
+      ```bash pnpm
+      pnpm install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure environment">
+    Create a `.env` file or set environment variables:
+
+    ```bash
+    export NODE_ENV=development
+    export PORT=3000
+    export JWT_SECRET=your-secret-key
+    export DB_HOST=localhost
+    export DB_PORT=5432
+    export DB_USER=appuser
+    export DB_PASSWORD=apppassword
+    export DB_NAME=ecommerce
+    ```
+  </Step>
+
+  <Step title="Run the service">
+    <CodeGroup>
+      ```bash development
+      npm run dev
+      ```
+
+      ```bash production
+      npm start
+      ```
+    </CodeGroup>
+
+    The service will start on `http://localhost:3000`
+  </Step>
+</Steps>
+
+## Project Structure
+
+```
+node-service/
+├── src/
+│   ├── index.js             # Application entry point
+│   ├── config.js            # Configuration
+│   ├── models/
+│   │   └── index.js         # Sequelize models
+│   ├── routes/
+│   │   ├── auth.js
+│   │   ├── users.js
+│   │   ├── products.js
+│   │   └── reports.js
+│   ├── middleware/
+│   │   ├── auth.js          # JWT authentication
+│   │   └── validate.js      # Request validation
+│   ├── services/
+│   │   └── userService.js
+│   └── utils/
+│       └── formatters.js
+├── tests/
+│   ├── setup.js
+│   ├── auth.test.js
+│   ├── users.test.js
+│   └── products.test.js
+├── package.json
+└── jest.config.js
+```
+
+## Configuration
+
+The service configuration is centralized in `src/config.js:3`:
+
+```javascript src/config.js
+require("dotenv").config();
+
+module.exports = {
+  database: {
+    host: process.env.DB_HOST || "localhost",
+    port: parseInt(process.env.DB_PORT || "5432", 10),
+    username: process.env.DB_USER || "appuser",
+    password: process.env.DB_PASSWORD || "apppassword",
+    name: process.env.DB_NAME || "ecommerce",
+    dialect: "postgres",
+    logging: process.env.NODE_ENV === "development" ? console.log : false,
+  },
+  jwt: {
+    secret: process.env.JWT_SECRET || "dev-secret-key",
+    expiresIn: "24h",
+  },
+  server: {
+    port: parseInt(process.env.PORT || "3000", 10),
+    env: process.env.NODE_ENV || "development",
+  },
+};
+```
+
+## Database Models
+
+All models are defined using Sequelize in `src/models/index.js`.
+
+### User Model
+
+Defined in `src/models/index.js:23`:
+
+```javascript src/models/index.js
+const User = sequelize.define("User", {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+  },
+  passwordHash: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    field: "password_hash",
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  profile: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: null,
+  },
+  role: {
+    type: DataTypes.STRING,
+    defaultValue: "customer",
+  },
+});
+```
+
+### Product Model
+
+Defined in `src/models/index.js:55`:
+
+```javascript src/models/index.js
+const Product = sequelize.define("Product", {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  description: {
+    type: DataTypes.TEXT,
+  },
+  price: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+  },
+  stock: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
+  category: {
+    type: DataTypes.STRING,
+  },
+});
+```
+
+### Order Model
+
+Defined in `src/models/index.js:82`:
+
+```javascript src/models/index.js
+const Order = sequelize.define("Order", {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  status: {
+    type: DataTypes.STRING,
+    defaultValue: "pending",
+  },
+  subtotal: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+  },
+  tax: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+  },
+  total: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+  },
+});
+
+// Associations
+User.hasMany(Order, { foreignKey: "userId" });
+Order.belongsTo(User, { foreignKey: "userId" });
+```
+
+## Middleware
+
+### Authentication Middleware
+
+JWT authentication middleware in `src/middleware/auth.js:4`:
+
+```javascript src/middleware/auth.js
+const jwt = require("jsonwebtoken");
+const config = require("../config");
+
+function authenticate(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, config.jwt.secret);
+    req.userId = decoded.userId;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+module.exports = { authenticate };
+```
+
+### Validation Middleware
+
+Request validation using express-validator in `src/middleware/validate.js:5`:
+
+```javascript src/middleware/validate.js
+const { check, validationResult } = require("express-validator");
+
+const EMAIL_REGEX = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function validateEmail(email) {
+  return EMAIL_REGEX.test(email);
+}
+
+// Registration validation rules
+const registerValidation = [
+  check("email")
+    .isEmail()
+    .withMessage("Invalid email format"),
+  check("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters"),
+  check("name")
+    .notEmpty()
+    .withMessage("Name is required"),
+];
+
+// Custom validation middleware
+function validateRequest(req, res, next) {
+  const errors = validationResult(req);
+
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: "Validation failed",
+      details: errors.array(),
+    });
+  }
+
+  // Additional custom email validation
+  if (req.body.email && !validateEmail(req.body.email)) {
+    return res.status(400).json({
+      error: "Validation failed",
+      details: [{ msg: "Invalid email format", param: "email" }],
+    });
+  }
+
+  next();
+}
+
+module.exports = {
+  registerValidation,
+  validateRequest,
+  validateEmail,
+};
+```
+
+## API Routes
+
+### Authentication Routes
+
+Defined in `src/routes/auth.js` and mounted at `/api/auth`:
+
+#### POST /api/auth/register
+
+Register a new user in `src/routes/auth.js:11`:
+
+```javascript src/routes/auth.js
+router.post("/register", registerValidation, validateRequest, async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+
+    // Check if user exists
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+      return res.status(409).json({ error: "Email already registered" });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    // Create user
+    const user = await User.create({
+      email,
+      passwordHash,
+      name,
+    });
+
+    // Generate token
+    const token = jwt.sign({ userId: user.id }, config.jwt.secret, {
+      expiresIn: config.jwt.expiresIn,
+    });
+
+    res.status(201).json({
+      message: "User registered successfully",
+      user: { id: user.id, email: user.email, name: user.name },
+      token,
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ error: "Registration failed" });
+  }
+});
+```
+
+#### POST /api/auth/login
+
+Authenticate user and return JWT token in `src/routes/auth.js:49`:
+
+```javascript src/routes/auth.js
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const token = jwt.sign({ userId: user.id }, config.jwt.secret, {
+      expiresIn: config.jwt.expiresIn,
+    });
+
+    res.json({
+      message: "Login successful",
+      user: { id: user.id, email: user.email, name: user.name },
+      token,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+```
+
+### User Routes
+
+Defined in `src/routes/users.js` and mounted at `/api/users`:
+
+#### GET /api/users/:id
+
+Get user by ID (requires authentication) in `src/routes/users.js:9`.
+
+#### GET /api/users/me/profile
+
+Get current user's profile in `src/routes/users.js:15`:
+
+```javascript src/routes/users.js
+router.get("/me/profile", authenticate, async (req, res) => {
+  try {
+    const user = await userService.getById(req.userId);
+    const formatted = formatUserResponse(user);
+    res.json({ user: formatted });
+  } catch (error) {
+    console.error("Profile error:", error);
+    res.status(500).json({ error: "Failed to fetch profile" });
+  }
+});
+```
+
+#### PUT /api/users/me/profile
+
+Update current user's profile in `src/routes/users.js:27`:
+
+```javascript src/routes/users.js
+router.put("/me/profile", authenticate, async (req, res) => {
+  try {
+    const { avatar, bio, phone } = req.body;
+    const user = await userService.updateProfile(req.userId, {
+      avatar,
+      bio,
+      phone,
+    });
+    res.json({
+      message: "Profile updated successfully",
+      user: user.toJSON(),
+    });
+  } catch (error) {
+    console.error("Profile update error:", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+```
+
+### Product Routes
+
+Defined in `src/routes/products.js` and mounted at `/api/products`:
+
+#### GET /api/products
+
+List products with pagination in `src/routes/products.js:9`:
+
+```javascript src/routes/products.js
+router.get("/", async (req, res) => {
+  try {
+    const { page, limit } = req.query;
+    const pagination = paginate(page, limit);
+
+    const { count, rows } = await Product.findAndCountAll({
+      limit: pagination.limit,
+      offset: pagination.offset,
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json({
+      products: rows.map(formatProductResponse),
+      total: count,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(count / pagination.limit),
+    });
+  } catch (error) {
+    console.error("List products error:", error);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+});
+```
+
+#### GET /api/products/search
+
+Search products using Fuse.js fuzzy search in `src/routes/products.js:34`:
+
+```javascript src/routes/products.js
+router.get("/search", async (req, res) => {
+  try {
+    const Fuse = require("fuse.js");
+    const { q } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ error: "Search query 'q' is required" });
+    }
+
+    const products = await Product.findAll();
+    const fuse = new Fuse(
+      products.map((p) => formatProductResponse(p)),
+      {
+        keys: ["name", "description"],
+        threshold: 0.4,
+      }
+    );
+
+    const results = fuse.search(q).map((r) => r.item);
+    res.json({ products: results, count: results.length });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({ error: "Search failed" });
+  }
+});
+```
+
+#### GET /api/products/:id
+
+Get a single product by ID in `src/routes/products.js:61`.
+
+#### POST /api/products
+
+Create a new product (requires authentication) in `src/routes/products.js:75`:
+
+```javascript src/routes/products.js
+router.post("/", authenticate, async (req, res) => {
+  try {
+    const { name, description, price, stock, category } = req.body;
+
+    if (!name || price === undefined) {
+      return res.status(400).json({ error: "Name and price are required" });
+    }
+
+    const product = await Product.create({
+      name,
+      description,
+      price,
+      stock: stock || 0,
+      category,
+    });
+
+    res.status(201).json({ product: formatProductResponse(product) });
+  } catch (error) {
+    console.error("Create product error:", error);
+    res.status(500).json({ error: "Failed to create product" });
+  }
+});
+```
+
+### Report Routes
+
+Defined in `src/routes/reports.js` and mounted at `/api/reports`:
+
+#### GET /api/reports/sales
+
+Generate HTML sales report (requires authentication) in `src/routes/reports.js:12`:
+
+```javascript src/routes/reports.js
+router.get("/sales", authenticate, async (req, res) => {
+  try {
+    // Fetch order data
+    const orders = await Order.findAll({
+      where: { status: "paid" },
+      order: [["createdAt", "DESC"]],
+      limit: 100,
+    });
+
+    let template = fs.readFileSync(TEMPLATE_PATH, "utf-8");
+
+    // Generate report data
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + parseFloat(order.total),
+      0
+    );
+    const orderCount = orders.length;
+
+    // Simple template interpolation
+    template = template
+      .replace("{{totalRevenue}}", totalRevenue.toFixed(2))
+      .replace("{{orderCount}}", orderCount)
+      .replace("{{generatedAt}}", new Date().toISOString());
+
+    const orderRows = orders
+      .map(
+        (order) =>
+          `<tr><td>${order.id}</td><td>$${parseFloat(order.total).toFixed(
+            2
+          )}</td><td>${order.status}</td><td>${order.createdAt}</td></tr>`
+      )
+      .join("\n");
+    template = template.replace("{{orderRows}}", orderRows);
+
+    res.type("html").send(template);
+  } catch (error) {
+    console.error("Report generation error:", error);
+    res.status(500).json({ error: "Failed to generate report" });
+  }
+});
+```
+
+## Application Entry Point
+
+The main application is configured in `src/index.js:9`:
+
+```javascript src/index.js
+const express = require("express");
+const cors = require("cors");
+const { sequelize } = require("./models");
+const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/users");
+const productRoutes = require("./routes/products");
+const reportRoutes = require("./routes/reports");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  })
+);
+
+app.use(express.json());
+
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/reports", reportRoutes);
+
+// Global error handler
+app.use((err, req, res, _next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({
+    error: "Internal server error",
+    message: process.env.NODE_ENV === "development" ? err.message : undefined,
+  });
+});
+
+// Start server
+async function start() {
+  try {
+    await sequelize.authenticate();
+    console.log("Database connected successfully");
+    await sequelize.sync();
+
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = app;
+```
+
+## Testing
+
+The service uses Jest with Supertest for API testing.
+
+### Running Tests
+
+```bash
+npm test
+
+# Watch mode
+npm test -- --watch
+
+# Coverage
+npm test -- --coverage
+```
+
+### Test Setup
+
+Test configuration uses SQLite in-memory database in `tests/auth.test.js:5`:
+
+```javascript tests/auth.test.js
+const request = require("supertest");
+const app = require("../src/index");
+const { sequelize, User } = require("../src/models");
+
+beforeAll(async () => {
+  await sequelize.sync({ force: true });
+});
+
+afterAll(async () => {
+  await sequelize.close();
+});
+
+beforeEach(async () => {
+  await User.destroy({ where: {} });
+});
+```
+
+### Example Tests
+
+From `tests/auth.test.js:17`:
+
+```javascript tests/auth.test.js
+describe("User Registration", () => {
+  test("should register user with valid data", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({
+        email: "test@example.com",
+        password: "password123",
+        name: "Test User",
+      });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.user.email).toBe("test@example.com");
+    expect(res.body.token).toBeDefined();
+  });
+
+  test("should reject duplicate email", async () => {
+    // Register first user
+    await request(app)
+      .post("/api/auth/register")
+      .send({
+        email: "duplicate@example.com",
+        password: "password123",
+        name: "First User",
+      });
+
+    // Try to register with same email
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({
+        email: "duplicate@example.com",
+        password: "password456",
+        name: "Second User",
+      });
+
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+describe("User Login", () => {
+  beforeEach(async () => {
+    await request(app)
+      .post("/api/auth/register")
+      .send({
+        email: "login@example.com",
+        password: "password123",
+        name: "Login User",
+      });
+  });
+
+  test("should login with valid credentials", async () => {
+    const res = await request(app)
+      .post("/api/auth/login")
+      .send({
+        email: "login@example.com",
+        password: "password123",
+      });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.token).toBeDefined();
+  });
+
+  test("should reject invalid password", async () => {
+    const res = await request(app)
+      .post("/api/auth/login")
+      .send({
+        email: "login@example.com",
+        password: "wrongpassword",
+      });
+
+    expect(res.statusCode).toBe(401);
+  });
+});
+```
+
+## Dependencies
+
+From `package.json`:
+
+```json package.json
+{
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.3",
+    "sequelize": "^6.35.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.50.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1",
+    "supertest": "^6.3.3"
+  }
+}
+```
+
+## Available Scripts
+
+From `package.json:6`:
+
+```json
+"scripts": {
+  "start": "node src/index.js",
+  "dev": "nodemon src/index.js",
+  "test": "jest --verbose --forceExit --detectOpenHandles",
+  "lint": "eslint src/ --ext .js"
+}
+```

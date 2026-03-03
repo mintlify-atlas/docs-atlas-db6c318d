@@ -1,0 +1,179 @@
+---
+title: Authentication
+description: User registration and login endpoints
+---
+
+The Node Service provides JWT-based authentication for user registration and login.
+
+## POST /api/auth/register
+
+Register a new user account.
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  User's email address (must be unique)
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password (will be hashed with bcrypt)
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  User's full name
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  Created user information
+  <Expandable title="properties">
+    <ResponseField name="id" type="integer">
+      User ID
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      User's email address
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      User's full name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="token" type="string">
+  JWT authentication token
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securePassword123",
+    "name": "John Doe"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "message": "User registered successfully",
+  "user": {
+    "id": 1,
+    "email": "user@example.com",
+    "name": "John Doe"
+  },
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Error Responses
+
+- `409 Conflict` - Email already registered
+- `400 Bad Request` - Validation failed
+- `500 Internal Server Error` - Registration failed
+
+---
+
+## POST /api/auth/login
+
+Authenticate a user and receive a JWT token.
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  User information
+  <Expandable title="properties">
+    <ResponseField name="id" type="integer">
+      User ID
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      User's email address
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      User's full name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="token" type="string">
+  JWT authentication token for subsequent requests
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securePassword123"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "message": "Login successful",
+  "user": {
+    "id": 1,
+    "email": "user@example.com",
+    "name": "John Doe"
+  },
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Error Responses
+
+- `400 Bad Request` - Email and password are required
+- `401 Unauthorized` - Invalid credentials
+- `500 Internal Server Error` - Login failed
+
+---
+
+## Authentication Middleware
+
+Protected endpoints require a valid JWT token in the `Authorization` header.
+
+### Header Format
+
+```
+Authorization: Bearer <token>
+```
+
+The authentication middleware (from `/workspace/source/node-service/src/middleware/auth.js:4`) validates the JWT token and extracts the `userId` for use in protected routes.
+
+### Example Authenticated Request
+
+```bash
+curl -X GET http://localhost:3000/api/users/me/profile \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Authentication Errors
+
+- `401 Unauthorized` - Missing or invalid `Authorization` header
+- `401 Unauthorized` - Invalid or expired token

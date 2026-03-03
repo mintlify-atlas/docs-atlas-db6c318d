@@ -1,0 +1,411 @@
+---
+title: Order Management Issues
+description: Order management incidents including N+1 query problems, calculation errors, and discount logic bugs
+---
+
+This page documents order management incidents in the ShopStack Python service, including performance issues, calculation errors, and business logic bugs.
+
+## Overview
+
+Order management issues can impact customer experience, revenue accuracy, and system performance. Common problems include:
+
+- N+1 query problems causing slow response times
+- Discount calculation errors
+- Order total miscalculations
+- Stock management bugs
+
+## Incidents
+
+<Accordion title="INC-005: Orders endpoint response time increased to 8 seconds">
+
+### Incident Details
+
+- **Severity**: P2 - High
+- **Service**: python-service
+- **Environment**: Production
+- **Reported**: 2026-02-28T08:00:00Z
+- **Status**: Resolved
+
+### Problem
+
+The `GET /api/orders` endpoint response time degraded severely from ~200ms to over 8 seconds after adding order items to the response payload. Database CPU utilization spiked to 85% during peak hours. The endpoint was executing hundreds of SELECT queries per single API call.
+
+**Symptoms:**
+- Response time: 5-10 seconds for users with 10+ orders
+- Database CPU: 85%+ during peak hours
+- Excessive database queries logged
+
+### Root Cause
+
+Classic N+1 query problem. The code was iterating through orders and lazily loading related `items` and `product` data for each order individually, resulting in:
+- 1 query to fetch all orders
+- N queries to fetch items for each order
+- N×M queries to fetch product details for each item
+
+For a user with 10 orders having 5 items each: 1 + 10 + 50 = 61 queries.
+
+**Location**: `app/routes/orders.py:11-32`
+
+### Problematic Code
+
+```python orders.py
+@orders_bp.route("/", methods=["GET"])
+@jwt_required()
+def list_orders():
+    user_id = get_jwt_identity()
+    orders = Order.query.filter_by(user_id=int(user_id)).all()  # 1 query
+    
+    result = []
+    for order in orders:  # N iterations
+        order_data = order.to_dict()
+        order_data["items"] = []
+        
+        for item in order.items:  # Lazy load - triggers query per order
+            item_data = item.to_dict()
+            if item.product:  # Another lazy load - query per item!
+                item_data["product_name"] = item.product.name
+            order_data["items"].append(item_data)
+        
+        result.append(order_data)
+    
+    return jsonify({"orders": result, "count": len(result)}), 200
+```
+
+### Resolution
+
+Use SQLAlchemy's eager loading with `joinedload()` to fetch all related data in a single query:
+
+```python orders.py
+from sqlalchemy.orm import joinedload
+
+@orders_bp.route("/", methods=["GET"])
+@jwt_required()
+def list_orders():
+    user_id = get_jwt_identity()
+    
+    # Eager load items and products in a single query using joins
+    orders = (
+        Order.query
+        .filter_by(user_id=int(user_id))
+        .options(
+            joinedload(Order.items).joinedload(OrderItem.product)
+        )
+        .all()
+    )
+    
+    result = []
+    for order in orders:
+        order_data = order.to_dict()
+        order_data["items"] = []
+        
+        # No additional queries - data already loaded
+        for item in order.items:
+            item_data = item.to_dict()
+            if item.product:
+                item_data["product_name"] = item.product.name
+            order_data["items"].append(item_data)
+        
+        result.append(order_data)
+    
+    return jsonify({"orders": result, "count": len(result)}), 200
+```
+
+**Results:**
+- Response time: Reduced from 8s to ~150ms (98% improvement)
+- Query count: From 61 queries to 1 query
+- Database CPU: Dropped from 85% to 15%
+
+### Prevention
+
+1. **Query monitoring**: Use Flask-SQLAlchemy's `get_debug_queries()` in development
+2. **Performance testing**: Load test endpoints with realistic data volumes
+3. **Database logging**: Enable slow query logging to catch N+1 issues early
+4. **Code review**: Watch for loops that access relationship attributes
+5. **ORM best practices**: Use `joinedload()`, `selectinload()`, or `subqueryload()` for relationships
+
+### Detection Query
+
+Add this middleware to detect N+1 queries in development:
+
+```python
+from flask_sqlalchemy import get_debug_queries
+
+@app.after_request
+def log_queries(response):
+    queries = get_debug_queries()
+    if len(queries) > 10:
+        app.logger.warning(
+            f"High query count: {len(queries)} queries in {request.path}"
+        )
+    return response
+```
+
+</Accordion>
+
+<Accordion title="INC-006: Discount code applied twice during checkout">
+
+### Incident Details
+
+- **Severity**: P1 - Critical
+- **Service**: python-service
+- **Environment**: Production
+- **Reported**: 2026-02-27T19:00:00Z
+- **Status**: Resolved
+
+### Problem
+
+Customers' discount codes were being applied twice during checkout, resulting in incorrect order totals and revenue loss. A $100 order with a 20% discount should cost $80, but customers were charged only $64 (discount applied twice: $100 → $80 → $64).
+
+**Impact:**
+- Revenue loss on discounted orders
+- Customer confusion about pricing
+- Accounting discrepancies
+
+### Root Cause
+
+The discount was being applied twice in the order creation flow:
+1. Once in `apply_discount()` which returned the discounted subtotal
+2. Again by subtracting `discount_amount` from the already-discounted subtotal
+
+This double application resulted in: `subtotal * (1 - rate) - (subtotal * rate)` instead of `subtotal * (1 - rate)`.
+
+**Location**: `app/routes/orders.py:81-91`
+
+### Problematic Code
+
+```python orders.py
+# Calculate tax and discount
+from app.services.payment_service import calculate_tax, apply_discount
+
+tax = calculate_tax(subtotal)
+discount_amount = 0
+discount_code = data.get("discount_code")
+
+if discount_code:
+    # apply_discount() already returns discounted_subtotal!
+    subtotal, discount_amount = apply_discount(subtotal, discount_code)
+
+# BUG: Subtracting discount_amount again from already-discounted subtotal
+total = subtotal + tax - discount_amount  # Double discount!
+```
+
+**Example with 20% discount on $100:**
+```python
+# apply_discount(100, "SAVE20") returns:
+subtotal = 80.0        # Already discounted: 100 * 0.8
+discount_amount = 20.0  # The amount that was subtracted
+
+# Then we subtract discount_amount AGAIN:
+total = 80 + tax - 20  # Results in $60 + tax instead of $80 + tax
+```
+
+### Resolution
+
+Remove the duplicate discount subtraction since `apply_discount()` already returns the discounted subtotal:
+
+```python orders.py
+# Calculate tax and discount
+from app.services.payment_service import calculate_tax, apply_discount
+
+tax = calculate_tax(subtotal)
+discount_amount = 0
+discount_code = data.get("discount_code")
+
+if discount_code:
+    # apply_discount returns (discounted_subtotal, discount_amount)
+    subtotal, discount_amount = apply_discount(subtotal, discount_code)
+    # subtotal is now the discounted amount, discount_amount is for display
+
+# Calculate total - subtotal is already discounted, just add tax
+total = subtotal + tax
+
+# Store the discount_amount separately for order records
+order = Order(
+    user_id=int(user_id),
+    subtotal=subtotal,  # This is post-discount
+    tax=tax,
+    discount_amount=discount_amount,  # For display/reporting only
+    total=total,
+    discount_code=discount_code,
+)
+```
+
+### Alternative Solution
+
+For clearer semantics, track original subtotal separately:
+
+```python orders.py
+original_subtotal = subtotal
+tax = calculate_tax(original_subtotal)
+discount_amount = 0
+discount_code = data.get("discount_code")
+
+if discount_code:
+    discounted_subtotal, discount_amount = apply_discount(original_subtotal, discount_code)
+else:
+    discounted_subtotal = original_subtotal
+
+total = discounted_subtotal + tax
+
+order = Order(
+    user_id=int(user_id),
+    original_subtotal=original_subtotal,
+    discount_amount=discount_amount,
+    subtotal=discounted_subtotal,
+    tax=tax,
+    total=total,
+    discount_code=discount_code,
+)
+```
+
+### Prevention
+
+1. **Unit tests**: Test discount calculations with known values
+2. **Variable naming**: Use clear names like `original_subtotal` vs `discounted_subtotal`
+3. **Function contracts**: Document what values functions return (pre/post discount)
+4. **Integration tests**: Verify end-to-end checkout totals
+5. **Code review**: Pay special attention to financial calculation logic
+
+### Test Cases
+
+```python
+def test_discount_applied_once():
+    """Verify discount is only applied once to order total."""
+    subtotal = 100.0
+    discount_code = "SAVE20"  # 20% off
+    
+    discounted_subtotal, discount_amount = apply_discount(subtotal, discount_code)
+    
+    assert discounted_subtotal == 80.0
+    assert discount_amount == 20.0
+    
+    tax = calculate_tax(subtotal)
+    total = discounted_subtotal + tax
+    
+    # Total should be $80 + tax, NOT $60 + tax
+    expected_total = 80.0 + tax
+    assert total == expected_total
+```
+
+</Accordion>
+
+## Common Patterns
+
+### Eager Loading Relationships
+
+```python
+from sqlalchemy.orm import joinedload, selectinload
+
+# Single relationship
+orders = Order.query.options(joinedload(Order.items)).all()
+
+# Nested relationships
+orders = Order.query.options(
+    joinedload(Order.items).joinedload(OrderItem.product)
+).all()
+
+# Multiple separate relationships (use selectinload for collections)
+orders = Order.query.options(
+    selectinload(Order.items),
+    joinedload(Order.user)
+).all()
+```
+
+### Discount Calculation Pattern
+
+```python
+def apply_discount(original_amount, discount_code):
+    """Apply discount and return (discounted_amount, discount_applied).
+    
+    Args:
+        original_amount: The pre-discount amount
+        discount_code: The discount code to apply
+        
+    Returns:
+        Tuple of (amount_after_discount, discount_amount)
+    """
+    discount_amount = calculate_discount(original_amount, discount_code)
+    discounted_amount = original_amount - discount_amount
+    return discounted_amount, discount_amount
+
+# Usage
+original_subtotal = 100.0
+final_subtotal, discount_applied = apply_discount(original_subtotal, "SAVE20")
+total = final_subtotal + calculate_tax(original_subtotal)
+```
+
+### Order Total Calculation
+
+```python
+def calculate_order_total(items, discount_code=None):
+    """Calculate order total with all components clearly separated."""
+    # Calculate original subtotal
+    subtotal = sum(item.price * item.quantity for item in items)
+    
+    # Apply discount if provided
+    discount_amount = 0
+    if discount_code:
+        discounted_subtotal, discount_amount = apply_discount(subtotal, discount_code)
+    else:
+        discounted_subtotal = subtotal
+    
+    # Calculate tax on original subtotal (or discounted, per business rules)
+    tax = calculate_tax(discounted_subtotal)
+    
+    # Final total
+    total = discounted_subtotal + tax
+    
+    return {
+        "subtotal": subtotal,
+        "discount_code": discount_code,
+        "discount_amount": discount_amount,
+        "discounted_subtotal": discounted_subtotal,
+        "tax": tax,
+        "total": total,
+    }
+```
+
+## Quick Reference
+
+| Issue Type | Symptom | Solution |
+|------------|---------|----------|
+| N+1 Query | Slow response, many DB queries | Use `joinedload()` or `selectinload()` |
+| Double discount | Total too low by discount amount | Remove duplicate discount subtraction |
+| Tax calculation error | Tax on wrong amount | Clarify pre/post discount tax calculation |
+| Stock inconsistency | Negative stock values | Use database transactions and locks |
+
+## Performance Monitoring
+
+### SQLAlchemy Query Logging
+
+```python
+import logging
+
+# Enable SQLAlchemy query logging in development
+logging.basicConfig()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+```
+
+### Query Count Middleware
+
+```python
+from flask import request
+from flask_sqlalchemy import get_debug_queries
+
+@app.after_request
+def check_query_count(response):
+    queries = get_debug_queries()
+    if len(queries) > 10:
+        app.logger.warning(
+            f"Endpoint {request.endpoint} executed {len(queries)} queries"
+        )
+        for query in queries:
+            app.logger.debug(f"Query: {query.statement}")
+    return response
+```
+
+## See Also
+
+- [Authentication Errors](/incidents/python/authentication-errors)
+- [Payment Processing Issues](/incidents/python/payment-processing)
+- [Product Operations Issues](/incidents/python/product-operations)

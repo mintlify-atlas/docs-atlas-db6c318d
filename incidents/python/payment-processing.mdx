@@ -1,0 +1,542 @@
+---
+title: Payment Processing Issues
+description: Payment processing incidents including calculation errors, missing imports, and business logic bugs
+---
+
+This page documents payment processing incidents in the ShopStack Python service, including tax calculation errors, missing imports, and checkout flow issues.
+
+## Overview
+
+Payment processing issues can cause revenue loss, customer frustration, and compliance problems. Common issues include:
+
+- Tax calculation errors due to integer division
+- Missing module imports causing runtime crashes
+- Payment flow interruptions
+- Calculation precision problems
+
+## Incidents
+
+<Accordion title="INC-004: Test payment flow failing - incorrect tax calculation">
+
+### Incident Details
+
+- **Severity**: P2 - High
+- **Service**: python-service
+- **Environment**: CI/Testing
+- **Reported**: 2026-02-28T11:30:00Z
+- **Status**: Resolved
+
+### Problem
+
+The `test_payment_flow` test suite started failing in CI after a refactoring to "improve precision" using integer arithmetic. Tax amounts were calculated as zero for order subtotals under $100, resulting in incorrect order totals.
+
+**Test Failures:**
+```
+FAILED tests/test_payments.py::TestPaymentFlow::test_calculate_total_with_tax
+  AssertionError: 49.99 != 54.24
+  
+FAILED tests/test_payments.py::TestPaymentFlow::test_checkout_flow_complete
+  AssertionError: Order total mismatch
+```
+
+### Root Cause
+
+The tax calculation was refactored to use integer division (`//`) instead of float division (`/`), causing the result to be truncated to zero for any subtotal less than $100 when the tax rate is 8.5%.
+
+**Math breakdown:**
+- For subtotal = $49.99 and tax rate = 8.5%:
+  - Expected: `49.99 * 8.5 / 100 = 4.25`
+  - Actual: `int(49.99) // 100 * 8.5 = 49 // 100 * 8.5 = 0 * 8.5 = 0`
+
+**Location**: `app/services/payment_service.py:13-23`
+
+### Problematic Code
+
+```python payment_service.py
+TAX_RATE = 8.5  # 8.5% tax rate
+
+def calculate_tax(subtotal):
+    """Calculate tax amount for a given subtotal.
+    
+    Args:
+        subtotal: The pre-tax subtotal amount.
+        
+    Returns:
+        The tax amount rounded to 2 decimal places.
+    """
+    # BUG: Integer division causes zero for subtotals < $100
+    tax = int(subtotal) // 100 * TAX_RATE
+    return round(tax, 2)
+```
+
+**Why this fails:**
+```python
+# Example with $49.99 subtotal:
+subtotal = 49.99
+tax = int(49.99) // 100 * 8.5
+    = 49 // 100 * 8.5
+    = 0 * 8.5
+    = 0.0  # Wrong!
+
+# Example with $150.00 subtotal:
+subtotal = 150.00
+tax = int(150.00) // 100 * 8.5
+    = 150 // 100 * 8.5
+    = 1 * 8.5
+    = 8.5  # Should be 12.75!
+```
+
+### Resolution
+
+Use proper float arithmetic for percentage calculations:
+
+```python payment_service.py
+TAX_RATE = 8.5  # 8.5% tax rate
+
+def calculate_tax(subtotal):
+    """Calculate tax amount for a given subtotal.
+    
+    Args:
+        subtotal: The pre-tax subtotal amount.
+        
+    Returns:
+        The tax amount rounded to 2 decimal places.
+    """
+    # Correct: Use float division for percentage calculation
+    tax = float(subtotal) * (TAX_RATE / 100)
+    return round(tax, 2)
+```
+
+**Verification:**
+```python
+# $49.99 subtotal:
+subtotal = 49.99
+tax = 49.99 * (8.5 / 100) = 49.99 * 0.085 = 4.24915
+rounded = round(4.24915, 2) = 4.25 ✓
+
+# $150.00 subtotal:
+subtotal = 150.00
+tax = 150.00 * (8.5 / 100) = 150.00 * 0.085 = 12.75 ✓
+```
+
+### Alternative: Use Decimal for Precision
+
+For financial calculations, consider using Python's `decimal` module:
+
+```python payment_service.py
+from decimal import Decimal, ROUND_HALF_UP
+
+TAX_RATE = Decimal('8.5')  # 8.5% tax rate
+
+def calculate_tax(subtotal):
+    """Calculate tax amount for a given subtotal.
+    
+    Args:
+        subtotal: The pre-tax subtotal amount (float or Decimal).
+        
+    Returns:
+        The tax amount as a Decimal rounded to 2 decimal places.
+    """
+    subtotal_decimal = Decimal(str(subtotal))
+    tax = subtotal_decimal * (TAX_RATE / Decimal('100'))
+    return tax.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+```
+
+### Prevention
+
+1. **Test edge cases**: Include tests with small amounts (< $1, < $10, < $100)
+2. **Never use integer division for percentages**: Always use float division for percentage calculations
+3. **Consider Decimal**: Use `decimal.Decimal` for financial calculations to avoid floating-point precision issues
+4. **Code review**: Be suspicious of "performance optimizations" in financial code
+5. **Regression tests**: Add failing test cases before fixing bugs
+
+### Test Coverage
+
+```python
+import pytest
+from app.services.payment_service import calculate_tax
+
+class TestTaxCalculation:
+    def test_tax_on_small_amount(self):
+        """Tax calculation works for amounts under $100."""
+        tax = calculate_tax(49.99)
+        assert tax == 4.25  # 49.99 * 8.5% = 4.24915, rounded to 4.25
+    
+    def test_tax_on_medium_amount(self):
+        """Tax calculation works for amounts over $100."""
+        tax = calculate_tax(150.00)
+        assert tax == 12.75  # 150.00 * 8.5% = 12.75
+    
+    def test_tax_on_large_amount(self):
+        """Tax calculation works for large amounts."""
+        tax = calculate_tax(1000.00)
+        assert tax == 85.00  # 1000.00 * 8.5% = 85.00
+    
+    def test_tax_on_zero(self):
+        """Tax calculation handles zero subtotal."""
+        tax = calculate_tax(0)
+        assert tax == 0.00
+    
+    def test_tax_precision(self):
+        """Tax calculation rounds correctly."""
+        tax = calculate_tax(10.01)  # 10.01 * 8.5% = 0.85085
+        assert tax == 0.85  # Should round down
+```
+
+</Accordion>
+
+<Accordion title="INC-008: Checkout endpoint crashes with NameError">
+
+### Incident Details
+
+- **Severity**: P1 - Critical
+- **Service**: python-service
+- **Environment**: Staging
+- **Reported**: 2026-02-28T16:45:00Z
+- **Status**: Resolved
+
+### Problem
+
+The `POST /api/payments/checkout` endpoint crashed with a 500 Internal Server Error when processing payments. The order was created successfully, but attempting to process the payment failed. This was introduced when adding logging statements to track payment events.
+
+**Error Message:**
+```
+NameError: name 'logging' is not defined 
+in app/routes/payments.py line 62
+```
+
+### Root Cause
+
+The `logging` module was used without being imported. A developer added `logging.info()` calls to track payment processing but forgot to add the import statement at the top of the file.
+
+**Location**: `app/routes/payments.py:62`
+
+### Problematic Code
+
+```python payments.py
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
+from app import db
+from app.models.order import Order
+from app.services.payment_service import calculate_tax, apply_discount
+
+# Missing: import logging
+
+payments_bp = Blueprint("payments", __name__)
+
+@payments_bp.route("/checkout", methods=["POST"])
+@jwt_required()
+def checkout():
+    """Process payment for an order."""
+    data = request.get_json()
+    
+    if not data or "order_id" not in data:
+        return jsonify({"error": "Missing required field: order_id"}), 400
+    
+    user_id = get_jwt_identity()
+    order = Order.query.filter_by(id=data["order_id"], user_id=int(user_id)).first()
+    
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    
+    if order.status != "pending":
+        return jsonify({"error": f"Order is already {order.status}"}), 400
+    
+    # Simulate payment processing
+    order.status = "paid"
+    # ERROR: 'logging' is not defined
+    logging.info(f"Payment processed for order {order.id}, total: {order.total}")
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Payment processed successfully",
+        "order": order.to_dict(),
+    }), 200
+```
+
+### Resolution
+
+Add the missing `logging` import:
+
+```python payments.py
+import logging  # Add this import
+
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
+from app import db
+from app.models.order import Order
+from app.services.payment_service import calculate_tax, apply_discount
+
+payments_bp = Blueprint("payments", __name__)
+
+@payments_bp.route("/checkout", methods=["POST"])
+@jwt_required()
+def checkout():
+    """Process payment for an order."""
+    data = request.get_json()
+    
+    if not data or "order_id" not in data:
+        return jsonify({"error": "Missing required field: order_id"}), 400
+    
+    user_id = get_jwt_identity()
+    order = Order.query.filter_by(id=data["order_id"], user_id=int(user_id)).first()
+    
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    
+    if order.status != "pending":
+        return jsonify({"error": f"Order is already {order.status}"}), 400
+    
+    # Simulate payment processing
+    order.status = "paid"
+    logging.info(f"Payment processed for order {order.id}, total: {order.total}")
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Payment processed successfully",
+        "order": order.to_dict(),
+    }), 200
+```
+
+### Alternative: Use Flask's Logger
+
+Flask applications have a built-in logger accessible via `current_app.logger`:
+
+```python payments.py
+from flask import Blueprint, request, jsonify, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
+from app import db
+from app.models.order import Order
+from app.services.payment_service import calculate_tax, apply_discount
+
+payments_bp = Blueprint("payments", __name__)
+
+@payments_bp.route("/checkout", methods=["POST"])
+@jwt_required()
+def checkout():
+    # ... validation code ...
+    
+    order.status = "paid"
+    # Use Flask's built-in logger
+    current_app.logger.info(f"Payment processed for order {order.id}, total: {order.total}")
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Payment processed successfully",
+        "order": order.to_dict(),
+    }), 200
+```
+
+### Prevention
+
+1. **Linting**: Use a linter like `pylint` or `flake8` to catch undefined names
+2. **IDE support**: Use an IDE that highlights undefined variables
+3. **Type checking**: Run `mypy` to catch missing imports and type errors
+4. **Pre-commit hooks**: Add linting to pre-commit hooks
+5. **Test coverage**: Ensure tests execute all code paths
+
+### Linting Configuration
+
+```ini .flake8
+[flake8]
+max-line-length = 100
+exclude = .git,__pycache__,venv
+ignore = E203,W503
+```
+
+```toml pyproject.toml
+[tool.pylint.messages_control]
+disable = []
+enable = ["undefined-variable", "import-error"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_imports = true
+warn_redundant_casts = true
+strict_optional = true
+```
+
+### Pre-commit Hook
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        args: [--max-line-length=100]
+  
+  - repo: https://github.com/PyCQA/pylint
+    rev: v3.0.0
+    hooks:
+      - id: pylint
+        args: [--disable=all, --enable=undefined-variable,import-error]
+```
+
+</Accordion>
+
+## Common Patterns
+
+### Tax Calculation Best Practices
+
+```python
+from decimal import Decimal, ROUND_HALF_UP
+
+TAX_RATE = Decimal('8.5')  # Store as Decimal for precision
+
+def calculate_tax(subtotal):
+    """Calculate tax with proper precision.
+    
+    Args:
+        subtotal: Pre-tax amount (float, int, or Decimal)
+        
+    Returns:
+        Tax amount as Decimal, rounded to 2 decimal places
+    """
+    # Convert to Decimal to avoid floating-point errors
+    subtotal_decimal = Decimal(str(subtotal))
+    
+    # Calculate tax as percentage
+    tax = subtotal_decimal * (TAX_RATE / Decimal('100'))
+    
+    # Round to 2 decimal places using banker's rounding
+    return tax.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+```
+
+### Payment Processing Pattern
+
+```python
+import logging
+from flask import current_app
+from decimal import Decimal
+
+def process_payment(order, payment_method):
+    """Process payment for an order with proper error handling.
+    
+    Args:
+        order: Order object to process payment for
+        payment_method: Payment method details
+        
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    logger = current_app.logger
+    
+    try:
+        # Validate order status
+        if order.status != 'pending':
+            logger.warning(f"Order {order.id} is not pending: {order.status}")
+            return False, f"Order is already {order.status}"
+        
+        # Validate amount
+        if order.total <= 0:
+            logger.error(f"Order {order.id} has invalid total: {order.total}")
+            return False, "Invalid order total"
+        
+        # Process payment (call payment gateway)
+        logger.info(f"Processing payment for order {order.id}, total: ${order.total}")
+        
+        # Simulate payment processing
+        # In production: payment_gateway.charge(order.total, payment_method)
+        
+        # Update order status
+        order.status = 'paid'
+        order.paid_at = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"Payment successful for order {order.id}")
+        return True, "Payment processed successfully"
+        
+    except Exception as e:
+        logger.error(f"Payment failed for order {order.id}: {str(e)}")
+        db.session.rollback()
+        return False, "Payment processing failed"
+```
+
+### Logging Setup
+
+```python
+import logging
+from flask import Flask
+
+def configure_logging(app: Flask):
+    """Configure application logging."""
+    
+    # Set log level based on environment
+    if app.config['DEBUG']:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    
+    # Configure format
+    formatter = logging.Formatter(
+        '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
+    )
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    app.logger.addHandler(console_handler)
+    
+    # File handler (production)
+    if not app.config['DEBUG']:
+        file_handler = logging.FileHandler('logs/app.log')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+        app.logger.addHandler(file_handler)
+    
+    app.logger.setLevel(log_level)
+```
+
+## Quick Reference
+
+| Issue Type | Common Cause | Quick Fix |
+|------------|--------------|----------|
+| Tax always zero | Integer division for percentages | Use `float(subtotal) * (rate / 100)` |
+| NameError | Missing import | Add import statement at top of file |
+| Rounding errors | Float precision issues | Use `decimal.Decimal` for money |
+| Tax on wrong amount | Pre/post discount confusion | Clarify tax calculation order |
+
+## Testing Guidelines
+
+### Essential Payment Tests
+
+```python
+import pytest
+from decimal import Decimal
+
+class TestPaymentCalculations:
+    """Test payment calculation edge cases."""
+    
+    def test_tax_calculation_precision(self):
+        """Tax calculation maintains precision."""
+        assert calculate_tax(Decimal('10.01')) == Decimal('0.85')
+        assert calculate_tax(Decimal('49.99')) == Decimal('4.25')
+    
+    def test_small_amounts(self):
+        """Tax works for amounts under $1."""
+        assert calculate_tax(Decimal('0.99')) == Decimal('0.08')
+    
+    def test_discount_before_tax(self):
+        """Discount is applied before tax."""
+        subtotal = Decimal('100.00')
+        discounted, _ = apply_discount(subtotal, 'SAVE20')
+        tax = calculate_tax(discounted)
+        total = discounted + tax
+        assert total == Decimal('86.80')  # 80 + (80 * 0.085)
+    
+    def test_checkout_flow(self):
+        """Full checkout flow calculates correctly."""
+        # Create order, apply discount, add tax, verify total
+        pass
+```
+
+## See Also
+
+- [Authentication Errors](/incidents/python/authentication-errors)
+- [Order Management Issues](/incidents/python/order-management)
+- [Product Operations Issues](/incidents/python/product-operations)

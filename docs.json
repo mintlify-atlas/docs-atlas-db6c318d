@@ -1,122 +1,113 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "ShopStack Platform",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#2563eb",
+    "light": "#3b82f6",
+    "dark": "#1e40af"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Rezinix-AI/shopstack-platform"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Rezinix-AI/shopstack-platform"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Services",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "services/python-service",
+              "services/node-service"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Deployment",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "deployment/docker",
+              "deployment/environment-variables"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Testing",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "testing/overview",
+              "testing/python-tests",
+              "testing/node-tests"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Python Service API",
             "pages": [
-              "api-reference/introduction"
+              "api/python/authentication",
+              "api/python/products",
+              "api/python/orders",
+              "api/python/payments"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Node Service API",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/node/authentication",
+              "api/node/users",
+              "api/node/products",
+              "api/node/reports"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Incident Resolution",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "incidents/getting-started",
+              "incidents/ticket-format"
+            ]
+          },
+          {
+            "group": "Python Service Issues",
+            "pages": [
+              "incidents/python/authentication-errors",
+              "incidents/python/order-management",
+              "incidents/python/payment-processing",
+              "incidents/python/product-operations"
+            ]
+          },
+          {
+            "group": "Node Service Issues",
+            "pages": [
+              "incidents/node/user-handling",
+              "incidents/node/product-search",
+              "incidents/node/report-generation",
+              "incidents/node/authentication"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

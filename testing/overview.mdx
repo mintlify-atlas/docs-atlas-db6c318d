@@ -1,0 +1,123 @@
+---
+title: 'Testing Overview'
+description: 'Comprehensive testing strategy for ShopStack Platform services'
+---
+
+## Testing Strategy
+
+ShopStack Platform uses a comprehensive testing approach across both services:
+
+- **Python Service**: pytest-based test suite with fixtures and database isolation
+- **Node.js Service**: Jest-based test suite with Sequelize ORM integration
+- **Integration Testing**: Full API endpoint coverage with authenticated requests
+- **Security Testing**: SQL injection prevention and input validation tests
+
+## Test Structure
+
+### Python Service Tests
+
+Located in `python-service/tests/`:
+
+```
+tests/
+├── conftest.py              # Pytest fixtures and configuration
+├── test_auth.py            # Authentication endpoint tests
+├── test_products.py        # Product CRUD and search tests
+├── test_orders.py          # Order creation and management tests
+├── test_payments.py        # Payment calculation and checkout tests
+└── test_security.py        # Security and SQL injection tests
+```
+
+### Node.js Service Tests
+
+Located in `node-service/tests/`:
+
+```
+tests/
+├── setup.js                # Test environment setup
+├── auth.test.js           # User registration and login tests
+├── users.test.js          # User profile management tests
+├── products.test.js       # Product pagination and search tests
+└── formatters.test.js     # Utility function unit tests
+```
+
+## Running All Tests
+
+Use the provided test runner script to execute all tests across both services:
+
+<Steps>
+  <Step title="Make script executable">
+    ```bash
+    chmod +x scripts/run_all_tests.sh
+    ```
+  </Step>
+
+  <Step title="Run all tests">
+    ```bash
+    ./scripts/run_all_tests.sh
+    ```
+
+    This script:
+    - Activates Python virtual environment
+    - Runs all pytest test suites
+    - Installs Node.js dependencies if needed
+    - Executes Jest test suite
+    - Provides summary report
+  </Step>
+</Steps>
+
+## Test Coverage Areas
+
+### Authentication & Authorization
+- User registration with validation
+- Login with JWT token generation
+- Email validation (including plus addressing)
+- Password verification
+- Duplicate email prevention
+
+### Product Management
+- Product listing with pagination
+- Category filtering
+- Search functionality
+- Product creation (authenticated)
+- Stock management
+
+### Order Processing
+- Order creation with multiple items
+- Stock validation
+- Discount code application
+- Order status tracking
+- Order item associations
+
+### Payment Processing
+- Tax calculation (8.5% rate)
+- Discount code validation
+- Total computation
+- Checkout flow
+- Payment status updates
+
+### Security
+- SQL injection prevention
+- Input sanitization
+- Authentication requirements
+- Authorization checks
+
+## Test Output
+
+Both test suites provide verbose output with:
+- Test names and descriptions
+- Pass/fail status for each test
+- Detailed error messages and stack traces
+- Test execution time
+- Coverage summary
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Python Tests" icon="python" href="/testing/python-tests">
+    Detailed Python test suite documentation
+  </Card>
+  <Card title="Node.js Tests" icon="node-js" href="/testing/node-tests">
+    Detailed Node.js test suite documentation
+  </Card>
+</CardGroup>

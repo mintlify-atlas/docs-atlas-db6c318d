@@ -1,0 +1,302 @@
+---
+title: Products
+description: Product management and search endpoints
+---
+
+The Products API provides endpoints for listing, searching, retrieving, and creating products.
+
+## GET /api/products
+
+Retrieve a paginated list of products.
+
+### Authentication
+
+Not required.
+
+### Query Parameters
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="limit" type="integer" default="10">
+  Number of products per page
+</ParamField>
+
+### Response
+
+<ResponseField name="products" type="array">
+  Array of product objects
+  <Expandable title="product properties">
+    <ResponseField name="id" type="integer">
+      Product ID
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Product name
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Product description
+    </ResponseField>
+    <ResponseField name="price" type="decimal">
+      Product price
+    </ResponseField>
+    <ResponseField name="stock" type="integer">
+      Available stock quantity
+    </ResponseField>
+    <ResponseField name="category" type="string">
+      Product category
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of products
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="limit" type="integer">
+  Products per page
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total number of pages
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "http://localhost:3000/api/products?page=1&limit=10"
+```
+
+### Example Response
+
+```json
+{
+  "products": [
+    {
+      "id": 1,
+      "name": "Laptop",
+      "description": "High-performance laptop",
+      "price": "999.99",
+      "stock": 50,
+      "category": "Electronics"
+    },
+    {
+      "id": 2,
+      "name": "Wireless Mouse",
+      "description": "Ergonomic wireless mouse",
+      "price": "29.99",
+      "stock": 200,
+      "category": "Accessories"
+    }
+  ],
+  "total": 45,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 5
+}
+```
+
+---
+
+## GET /api/products/search
+
+Search products using fuzzy search.
+
+### Authentication
+
+Not required.
+
+### Query Parameters
+
+<ParamField query="q" type="string" required>
+  Search query string (searches in name and description fields)
+</ParamField>
+
+### Response
+
+<ResponseField name="products" type="array">
+  Array of matching product objects
+</ResponseField>
+
+<ResponseField name="count" type="integer">
+  Number of results found
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "http://localhost:3000/api/products/search?q=laptop"
+```
+
+### Example Response
+
+```json
+{
+  "products": [
+    {
+      "id": 1,
+      "name": "Laptop",
+      "description": "High-performance laptop",
+      "price": "999.99",
+      "stock": 50,
+      "category": "Electronics"
+    }
+  ],
+  "count": 1
+}
+```
+
+### Error Responses
+
+- `400 Bad Request` - Search query 'q' is required
+- `500 Internal Server Error` - Search failed
+
+<Note>
+The search uses Fuse.js for fuzzy matching with a threshold of 0.4, searching across product names and descriptions.
+</Note>
+
+---
+
+## GET /api/products/:id
+
+Retrieve a single product by ID.
+
+### Authentication
+
+Not required.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Product ID
+</ParamField>
+
+### Response
+
+<ResponseField name="product" type="object">
+  Product information
+  <Expandable title="properties">
+    <ResponseField name="id" type="integer">
+      Product ID
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Product name
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Product description
+    </ResponseField>
+    <ResponseField name="price" type="decimal">
+      Product price
+    </ResponseField>
+    <ResponseField name="stock" type="integer">
+      Available stock quantity
+    </ResponseField>
+    <ResponseField name="category" type="string">
+      Product category
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET http://localhost:3000/api/products/1
+```
+
+### Example Response
+
+```json
+{
+  "product": {
+    "id": 1,
+    "name": "Laptop",
+    "description": "High-performance laptop",
+    "price": "999.99",
+    "stock": 50,
+    "category": "Electronics"
+  }
+}
+```
+
+### Error Responses
+
+- `404 Not Found` - Product not found
+- `500 Internal Server Error` - Failed to fetch product
+
+---
+
+## POST /api/products
+
+Create a new product.
+
+### Authentication
+
+Required. Include JWT token in `Authorization` header.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Product name
+</ParamField>
+
+<ParamField body="price" type="decimal" required>
+  Product price
+</ParamField>
+
+<ParamField body="description" type="string">
+  Product description
+</ParamField>
+
+<ParamField body="stock" type="integer" default="0">
+  Initial stock quantity
+</ParamField>
+
+<ParamField body="category" type="string">
+  Product category
+</ParamField>
+
+### Response
+
+<ResponseField name="product" type="object">
+  Created product information
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:3000/api/products \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Mechanical Keyboard",
+    "description": "RGB mechanical keyboard with cherry switches",
+    "price": 149.99,
+    "stock": 75,
+    "category": "Accessories"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "product": {
+    "id": 3,
+    "name": "Mechanical Keyboard",
+    "description": "RGB mechanical keyboard with cherry switches",
+    "price": "149.99",
+    "stock": 75,
+    "category": "Accessories"
+  }
+}
+```
+
+### Error Responses
+
+- `400 Bad Request` - Name and price are required
+- `401 Unauthorized` - Missing or invalid authentication token
+- `500 Internal Server Error` - Failed to create product

@@ -1,0 +1,627 @@
+---
+title: Authentication Issues
+description: Node.js service incidents related to authentication, CORS, and validation
+---
+
+This page documents incidents related to authentication, CORS configuration, and request validation in the Node.js service.
+
+## Overview
+
+Authentication and validation incidents typically involve:
+- CORS misconfiguration blocking legitimate requests
+- Breaking changes in validation libraries
+- Overly restrictive or incorrect validation rules
+
+## Incidents
+
+<Accordion title="INC-102: CORS Misconfiguration Blocking Frontend">
+
+### Summary
+
+**Severity:** P1 - Critical  
+**Service:** node-service  
+**Date:** 2026-02-28  
+**Environment:** Staging
+
+All API requests from the frontend were blocked by CORS policy. The frontend runs on port 5173 (Vite dev server) but CORS was configured to only allow port 3000.
+
+### Problem
+
+Browser console showed:
+```
+Access to XMLHttpRequest at 'http://localhost:3000/api/products' from origin 
+'http://localhost:5173' has been blocked by CORS policy: Response to preflight 
+request doesn't pass access control check: The 'Access-Control-Allow-Origin' 
+header has a value 'http://localhost:3000' that is not equal to the supplied origin.
+```
+
+### Root Cause
+
+The CORS middleware was configured to only accept requests from the API's own origin, not from the frontend application.
+
+**Problematic code** (src/index.js:12-17):
+```javascript
+app.use(
+  cors({
+    origin: "http://localhost:3000",  // This is the API's own URL!
+    credentials: true,
+  })
+);
+```
+
+This configuration tells the API to only accept requests coming from `http://localhost:3000`, which is the API itself. The frontend runs on `http://localhost:5173`, so all its requests are rejected.
+
+### Resolution
+
+**Solution 1: Allow specific origins**
+
+Configure CORS to accept requests from the frontend origin:
+
+```javascript
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",  // Vite dev server
+      "http://localhost:3000",  // Legacy frontend
+      "https://shopstack.com",  // Production frontend
+    ],
+    credentials: true,
+  })
+);
+```
+
+**Solution 2: Environment-based configuration**
+
+Use environment variables for flexible configuration:
+
+```javascript
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:5173'];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, curl, etc.)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  })
+);
+```
+
+**Solution 3: Pattern-based matching for development**
+
+```javascript
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      
+      // In development, allow localhost on any port
+      if (isDevelopment && origin.startsWith('http://localhost:')) {
+        return callback(null, true);
+      }
+      
+      // In production, check against whitelist
+      const allowedOrigins = [
+        'https://shopstack.com',
+        'https://www.shopstack.com',
+      ];
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  })
+);
+```
+
+**Environment variable (.env):**
+```bash
+NODE_ENV=development
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000,https://shopstack.com
+```
+
+### Prevention
+
+- Never hardcode origin URLs in CORS configuration
+- Use environment variables for different environments (dev, staging, production)
+- Test CORS configuration with the actual frontend during development
+- Add integration tests that verify CORS headers:
+
+```javascript
+it('should allow requests from frontend origin', async () => {
+  const response = await request(app)
+    .get('/api/health')
+    .set('Origin', 'http://localhost:5173');
+  
+  expect(response.headers['access-control-allow-origin'])
+    .toBe('http://localhost:5173');
+});
+```
+
+- Document allowed origins in your README or configuration docs
+
+</Accordion>
+
+<Accordion title="INC-103: Validation Broken After express-validator Upgrade">
+
+### Summary
+
+**Severity:** P2 - High  
+**Service:** node-service  
+**Date:** 2026-02-27  
+**Environment:** All
+
+After upgrading `express-validator` from v6 to v7, all request validation stopped working. Invalid requests that should be rejected with 400 errors were passing through, causing database constraint violations and 500 errors.
+
+### Problem
+
+Sending `POST /api/auth/register` with an empty body resulted in:
+```
+SequelizeValidationError: notNull Violation: users.email cannot be null
+```
+
+Expected: 400 error with validation message "Invalid email format"  
+Actual: 500 error from database constraint violation
+
+### Root Cause
+
+express-validator v7 introduced breaking changes in its API. The v6 API patterns used in the code were deprecated and no longer functional.
+
+The validation middleware was still using v6 patterns:
+
+**Current code that no longer works** (src/middleware/validate.js):
+```javascript
+const { check, validationResult } = require("express-validator");
+
+const registerValidation = [
+  check("email")
+    .isEmail()
+    .withMessage("Invalid email format"),
+  check("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters"),
+  check("name")
+    .notEmpty()
+    .withMessage("Name is required"),
+];
+```
+
+In express-validator v7, the `check()` function and chaining API were replaced with a new schema-based API.
+
+### Resolution
+
+**Option 1: Downgrade to v6 (quick fix)**
+
+```bash
+npm install express-validator@^6.14.0
+```
+
+Update `package.json`:
+```json
+{
+  "dependencies": {
+    "express-validator": "^6.14.0"
+  }
+}
+```
+
+**Option 2: Migrate to v7 API (recommended)**
+
+Update validation middleware to use the new API:
+
+```javascript
+const { body, validationResult } = require("express-validator");
+
+// Use body() instead of check()
+const registerValidation = [
+  body("email")
+    .isEmail()
+    .withMessage("Invalid email format"),
+  body("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters"),
+  body("name")
+    .notEmpty()
+    .withMessage("Name is required"),
+];
+
+// Validation result handler remains the same
+function validateRequest(req, res, next) {
+  const errors = validationResult(req);
+
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: "Validation failed",
+      details: errors.array(),
+    });
+  }
+
+  next();
+}
+
+module.exports = {
+  registerValidation,
+  validateRequest,
+};
+```
+
+**Option 3: Use schema-based validation (v7 preferred pattern)**
+
+```javascript
+const { checkSchema, validationResult } = require("express-validator");
+
+const registerValidationSchema = checkSchema({
+  email: {
+    isEmail: {
+      errorMessage: "Invalid email format",
+    },
+    normalizeEmail: true,
+  },
+  password: {
+    isLength: {
+      options: { min: 8 },
+      errorMessage: "Password must be at least 8 characters",
+    },
+  },
+  name: {
+    notEmpty: {
+      errorMessage: "Name is required",
+    },
+    trim: true,
+  },
+});
+
+// Usage in route
+router.post("/register", registerValidationSchema, validateRequest, async (req, res) => {
+  // Handler code
+});
+```
+
+### Prevention
+
+- Always read CHANGELOG and migration guides before upgrading dependencies
+- Pin major versions in `package.json` to avoid automatic breaking changes:
+
+```json
+{
+  "dependencies": {
+    "express-validator": "6.14.0"  // Exact version
+    // or
+    "express-validator": "~6.14.0"  // Patch updates only
+  }
+}
+```
+
+- Run tests after every dependency upgrade:
+
+```bash
+npm update
+npm test
+```
+
+- Use automated tools to check for breaking changes:
+
+```bash
+npx npm-check-updates
+```
+
+- Add validation tests:
+
+```javascript
+describe('POST /api/auth/register', () => {
+  it('should reject empty email', async () => {
+    const response = await request(app)
+      .post('/api/auth/register')
+      .send({ password: 'password123', name: 'Test' });
+    
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Validation failed');
+  });
+  
+  it('should reject short password', async () => {
+    const response = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'test@example.com', password: '123', name: 'Test' });
+    
+    expect(response.status).toBe(400);
+  });
+});
+```
+
+</Accordion>
+
+<Accordion title="INC-104: Email Validation Regex Too Restrictive">
+
+### Summary
+
+**Severity:** P3 - Medium  
+**Service:** node-service  
+**Date:** 2026-02-28  
+**Environment:** CI
+
+User registration tests failed because the email validation regex rejected valid email addresses containing `+` characters (e.g., `user+tag@example.com`). This prevented users from using Gmail's plus-addressing feature.
+
+### Problem
+
+Test failures:
+```
+FAIL tests/auth.test.js
+  User Registration
+    ✓ should register user with valid data (45ms)
+    ✗ should accept valid email with plus addressing (12ms)
+      Expected: 201
+      Received: 400
+```
+
+Users reported they couldn't register with emails like:
+- `user+test@gmail.com`
+- `john.doe+shopstack@example.com`
+
+### Root Cause
+
+A custom email validation regex was added that doesn't comply with RFC 5322 email standards. The regex excludes the `+` character and other valid email characters.
+
+**Problematic code** (src/middleware/validate.js:3-7):
+```javascript
+const EMAIL_REGEX = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function validateEmail(email) {
+  return EMAIL_REGEX.test(email);
+}
+```
+
+This regex only allows:
+- Letters (a-z, A-Z)
+- Numbers (0-9)
+- Period (.), underscore (_), hyphen (-)
+
+It rejects valid characters like `+`, which is commonly used for email aliasing.
+
+### Resolution
+
+**Solution 1: Remove custom regex, use express-validator's built-in validation**
+
+The best solution is to rely on express-validator's `isEmail()` which is RFC 5322 compliant:
+
+```javascript
+const { body, validationResult } = require("express-validator");
+
+const registerValidation = [
+  body("email")
+    .isEmail()  // Built-in validator handles all valid email formats
+    .withMessage("Invalid email format"),
+  body("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters"),
+  body("name")
+    .notEmpty()
+    .withMessage("Name is required"),
+];
+
+// Remove custom validateEmail function and EMAIL_REGEX
+
+function validateRequest(req, res, next) {
+  const errors = validationResult(req);
+
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: "Validation failed",
+      details: errors.array(),
+    });
+  }
+
+  next();
+}
+
+module.exports = {
+  registerValidation,
+  validateRequest,
+};
+```
+
+**Solution 2: Fix the regex to allow + and other valid characters**
+
+If you must use a custom regex, make it RFC 5322 compliant:
+
+```javascript
+// More permissive regex that allows +, !, #, $, %, &, etc.
+const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function validateEmail(email) {
+  return EMAIL_REGEX.test(email);
+}
+```
+
+However, writing a fully RFC 5322 compliant regex is very complex. It's better to use a library.
+
+**Solution 3: Use a dedicated email validation library**
+
+```bash
+npm install validator
+```
+
+```javascript
+const validator = require('validator');
+
+function validateEmail(email) {
+  return validator.isEmail(email, {
+    allow_utf8_local_part: false  // Optional: reject unicode characters
+  });
+}
+```
+
+### Prevention
+
+- Never write custom validation for complex formats like emails
+- Use established libraries that implement standards correctly
+- Add comprehensive test cases for edge cases:
+
+```javascript
+describe('Email validation', () => {
+  const validEmails = [
+    'user@example.com',
+    'user+tag@example.com',
+    'user.name@example.com',
+    'user_name@example.com',
+    'user-name@example.com',
+    'user123@example.co.uk',
+    'a@example.com',
+  ];
+  
+  const invalidEmails = [
+    'notanemail',
+    '@example.com',
+    'user@',
+    'user @example.com',
+    'user@example',
+    '',
+  ];
+  
+  validEmails.forEach(email => {
+    it(`should accept valid email: ${email}`, async () => {
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ email, password: 'password123', name: 'Test' });
+      
+      expect(response.status).not.toBe(400);
+    });
+  });
+  
+  invalidEmails.forEach(email => {
+    it(`should reject invalid email: ${email}`, async () => {
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ email, password: 'password123', name: 'Test' });
+      
+      expect(response.status).toBe(400);
+    });
+  });
+});
+```
+
+- Reference standards documentation:
+  - [RFC 5322 - Internet Message Format](https://tools.ietf.org/html/rfc5322)
+  - [Email address validation on Wikipedia](https://en.wikipedia.org/wiki/Email_address#Syntax)
+
+</Accordion>
+
+## Best Practices
+
+### CORS Configuration
+
+**Development-friendly CORS:**
+```javascript
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);  // Allow non-browser requests
+    
+    if (isDevelopment && origin.startsWith('http://localhost:')) {
+      return callback(null, true);  // Allow any localhost port in dev
+    }
+    
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
+```
+
+### Validation Best Practices
+
+**Use schema-based validation:**
+```javascript
+const { checkSchema } = require('express-validator');
+
+const userSchema = checkSchema({
+  email: {
+    isEmail: true,
+    normalizeEmail: true,
+    errorMessage: 'Invalid email address',
+  },
+  password: {
+    isLength: { options: { min: 8 } },
+    matches: {
+      options: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+      errorMessage: 'Password must contain uppercase, lowercase, and number',
+    },
+  },
+  name: {
+    trim: true,
+    notEmpty: true,
+    isLength: { options: { min: 2, max: 100 } },
+  },
+});
+```
+
+### Dependency Management
+
+**Lock major versions:**
+```json
+{
+  "dependencies": {
+    "express-validator": "^6.14.0",  // ^ allows minor/patch updates
+    "cors": "~2.8.5"  // ~ allows patch updates only
+  }
+}
+```
+
+**Test before upgrading:**
+```bash
+# Check what would be updated
+npm outdated
+
+# Update one package at a time
+npm update express-validator
+npm test
+
+# If tests pass, commit
+git add package.json package-lock.json
+git commit -m "chore: update express-validator to v6.15.0"
+```
+
+### Error Response Format
+
+**Consistent validation error format:**
+```javascript
+function validateRequest(req, res, next) {
+  const errors = validationResult(req);
+  
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: errors.array().map(err => ({
+        field: err.path,
+        message: err.msg,
+        value: err.value,
+      })),
+    });
+  }
+  
+  next();
+}
+```

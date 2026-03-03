@@ -1,0 +1,137 @@
+---
+title: Reports & Health
+description: Sales reporting and health check endpoints
+---
+
+The Reports API provides sales reporting and system health monitoring.
+
+## GET /api/reports/sales
+
+Generate an HTML sales report based on paid orders.
+
+### Authentication
+
+Required. Include JWT token in `Authorization` header.
+
+### Response
+
+Returns an HTML document containing:
+
+- Total revenue from paid orders
+- Number of orders
+- Detailed order table with ID, total, status, and creation date
+- Generation timestamp
+
+### Example Request
+
+```bash
+curl -X GET http://localhost:3000/api/reports/sales \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Response Format
+
+The endpoint returns an HTML report with the following data:
+
+- **Content-Type**: `text/html`
+- **Template Variables**:
+  - `{{totalRevenue}}` - Sum of all paid orders
+  - `{{orderCount}}` - Total number of paid orders
+  - `{{generatedAt}}` - ISO timestamp of report generation
+  - `{{orderRows}}` - HTML table rows with order details
+
+### Example HTML Response
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Sales Report</title>
+</head>
+<body>
+  <h1>Sales Report</h1>
+  <p>Total Revenue: $12,450.75</p>
+  <p>Total Orders: 42</p>
+  <p>Generated: 2026-03-03T14:30:00.000Z</p>
+  
+  <table>
+    <thead>
+      <tr>
+        <th>Order ID</th>
+        <th>Total</th>
+        <th>Status</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>$299.99</td><td>paid</td><td>2026-03-01T10:00:00.000Z</td></tr>
+      <tr><td>2</td><td>$149.50</td><td>paid</td><td>2026-03-02T15:30:00.000Z</td></tr>
+      <!-- ... more rows ... -->
+    </tbody>
+  </table>
+</body>
+</html>
+```
+
+### Report Details
+
+<Note>
+The report fetches the 100 most recent paid orders, ordered by creation date (descending).
+</Note>
+
+The report generation process:
+
+1. Queries all orders with status `paid` from the database
+2. Limits results to 100 most recent orders
+3. Calculates total revenue by summing order totals
+4. Loads HTML template from `src/templates/report.html`
+5. Interpolates data into template variables
+6. Returns rendered HTML document
+
+### Error Responses
+
+- `401 Unauthorized` - Missing or invalid authentication token
+- `500 Internal Server Error` - Failed to generate report
+
+---
+
+## GET /api/health
+
+Health check endpoint for monitoring service availability.
+
+### Authentication
+
+Not required.
+
+### Response
+
+<ResponseField name="status" type="string">
+  Service status (always "ok" if responding)
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  Current server time in ISO 8601 format
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET http://localhost:3000/api/health
+```
+
+### Example Response
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-03-03T14:30:00.000Z"
+}
+```
+
+<Tip>
+This endpoint is useful for:
+- Container health checks (Docker, Kubernetes)
+- Load balancer health probes
+- Uptime monitoring services
+- Deployment verification
+</Tip>

@@ -1,80 +1,334 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get ShopStack Platform running locally in minutes
 ---
 
-## Get started in three steps
+Get both microservices up and running in your local environment.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, ensure you have the following installed:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+| Tool | Minimum Version |
+|------|----------------|
+| Python | 3.10+ |
+| pip | Latest |
+| Node.js | 18+ |
+| npm | 9+ |
+| Docker & Docker Compose | 20+ / 2.0+ (optional) |
+
+## Local Development Setup
+
+<Tabs>
+  <Tab title="Python Service">
+    <Steps>
+      <Step title="Navigate to the Python service directory">
+        ```bash
+        cd python-service
+        ```
+      </Step>
+      
+      <Step title="Create and activate a virtual environment">
+        <CodeGroup>
+          ```bash macOS/Linux
+          python -m venv venv
+          source venv/bin/activate
+          ```
+          
+          ```bash Windows
+          python -m venv venv
+          venv\Scripts\activate
+          ```
+        </CodeGroup>
+      </Step>
+      
+      <Step title="Install dependencies">
+        ```bash
+        pip install -r requirements.txt
+        ```
+      </Step>
+      
+      <Step title="Run the server">
+        ```bash
+        python run.py
+        ```
+        
+        The Python service will start on **http://localhost:5000**
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Node.js Service">
+    <Steps>
+      <Step title="Navigate to the Node service directory">
+        ```bash
+        cd node-service
+        ```
+      </Step>
+      
+      <Step title="Install dependencies">
+        <CodeGroup>
+          ```bash npm
+          npm install
+          ```
+          
+          ```bash yarn
+          yarn install
+          ```
+          
+          ```bash pnpm
+          pnpm install
+          ```
+        </CodeGroup>
+      </Step>
+      
+      <Step title="Run the server">
+        ```bash
+        npm start
+        ```
+        
+        The Node.js service will start on **http://localhost:3000**
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Docker (Full Stack)">
+    <Steps>
+      <Step title="Start all services with Docker Compose">
+        ```bash
+        docker-compose up --build
+        ```
+        
+        This will start:
+        - Python API: **http://localhost:5000**
+        - Node.js API: **http://localhost:3000**
+        - PostgreSQL: **localhost:5432**
+        - Redis: **localhost:6379**
+      </Step>
+      
+      <Step title="Verify services are running">
+        Check the health endpoints:
+        
+        ```bash
+        curl http://localhost:5000/api/health
+        curl http://localhost:3000/api/health
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Run the Tests
+
+Verify your setup by running the test suites:
+
+<Tabs>
+  <Tab title="Python Tests">
+    ```bash
+    cd python-service
+    source venv/bin/activate  # macOS/Linux
+    python -m pytest tests/ -v
+    ```
+  </Tab>
+  
+  <Tab title="Node.js Tests">
+    ```bash
+    cd node-service
+    npm test
+    ```
+  </Tab>
+  
+  <Tab title="All Tests">
+    ```bash
+    chmod +x scripts/run_all_tests.sh
+    ./scripts/run_all_tests.sh
+    ```
+  </Tab>
+</Tabs>
+
+## Make Your First API Call
+
+<Steps>
+  <Step title="Register a new user">
+    ```bash
+    curl -X POST http://localhost:5000/api/auth/register \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "user@example.com",
+        "password": "securepassword123",
+        "name": "John Doe"
+      }'
+    ```
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    Response:
+    ```json
+    {
+      "message": "User registered successfully",
+      "user": {
+        "id": 1,
+        "email": "user@example.com",
+        "name": "John Doe",
+        "role": "customer"
+      },
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    }
+    ```
+  </Step>
+  
+  <Step title="Login and get JWT token">
+    ```bash
+    curl -X POST http://localhost:5000/api/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "user@example.com",
+        "password": "securepassword123"
+      }'
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    Save the `access_token` from the response for authenticated requests.
+  </Step>
+  
+  <Step title="Create a product (authenticated)">
+    ```bash
+    curl -X POST http://localhost:5000/api/products \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+      -d '{
+        "name": "Wireless Headphones",
+        "description": "Premium noise-cancelling headphones",
+        "price": 299.99,
+        "stock": 50,
+        "category": "electronics"
+      }'
+    ```
+  </Step>
+  
+  <Step title="List all products (public endpoint)">
+    ```bash
+    curl http://localhost:5000/api/products
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    Response:
+    ```json
+    {
+      "products": [
+        {
+          "id": 1,
+          "name": "Wireless Headphones",
+          "description": "Premium noise-cancelling headphones",
+          "price": 299.99,
+          "stock": 50,
+          "category": "electronics"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "per_page": 20,
+        "total": 1,
+        "pages": 1
+      }
+    }
+    ```
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Environment Configuration
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+Both services use environment variables for configuration. For local development, the default values work out of the box.
 
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+<Tabs>
+  <Tab title="Python Service">
+    Create a `.env` file in `python-service/`:
+    
+    ```bash
+    FLASK_ENV=development
+    SECRET_KEY=dev-secret-key
+    DATABASE_HOST=localhost
+    DATABASE_PORT=5432
+    ```
+  </Tab>
+  
+  <Tab title="Node.js Service">
+    Create a `.env` file in `node-service/`:
+    
+    ```bash
+    NODE_ENV=development
+    PORT=3000
+    JWT_SECRET=your-secret-key
+    DB_HOST=localhost
+    DB_PORT=5432
+    ```
+  </Tab>
+</Tabs>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+For testing, both services automatically use SQLite in-memory databases, so you don't need PostgreSQL running locally.
 </Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="psycopg2-binary fails to install">
+    This is expected for local development. The Python service uses SQLite for testing, so PostgreSQL dependencies are optional.
+    
+    Skip the error or install without PostgreSQL support:
+    ```bash
+    pip install -r requirements.txt --no-deps
+    ```
+  </Accordion>
+  
+  <Accordion title="ModuleNotFoundError: No module named 'app'">
+    Make sure you're running commands from the `python-service/` directory, not the project root.
+  </Accordion>
+  
+  <Accordion title="Port already in use">
+    If port 5000 or 3000 is already in use, you can specify a different port:
+    
+    ```bash
+    # Python
+    FLASK_RUN_PORT=5001 python run.py
+    
+    # Node.js
+    PORT=3001 npm start
+    ```
+  </Accordion>
+  
+  <Accordion title="sqlite3 build errors (Node)">
+    If you encounter native module build errors for sqlite3:
+    
+    ```bash
+    npm rebuild sqlite3
+    ```
+    
+    Or ensure you have native build tools installed (python, make, gcc).
+  </Accordion>
+  
+  <Accordion title="Docker containers fail to start">
+    Check if ports are available and no other containers are running:
+    
+    ```bash
+    docker-compose down
+    docker-compose up --build
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Explore the Architecture" icon="sitemap" href="/architecture">
+    Understand the microservices architecture and design decisions
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/python/authentication">
+    Browse the complete API documentation for both services
+  </Card>
+  
+  <Card title="Testing Guide" icon="flask" href="/testing/overview">
+    Learn about the test suites and how to write tests
+  </Card>
+  
+  <Card title="Deploy with Docker" icon="docker" href="/deployment/docker">
+    Deploy the full stack with Docker Compose
+  </Card>
+</CardGroup>

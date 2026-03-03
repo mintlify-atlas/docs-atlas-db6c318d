@@ -1,0 +1,522 @@
+---
+title: Product Operations Issues
+description: Product operation incidents including SQL injection vulnerabilities, search functionality issues, and security concerns
+---
+
+This page documents product operation incidents in the ShopStack Python service, with a focus on security vulnerabilities, particularly SQL injection attacks.
+
+## Overview
+
+Product operations issues can expose critical security vulnerabilities, compromise data integrity, and impact search functionality. The most severe issues include:
+
+- SQL injection vulnerabilities
+- Unsafe query construction
+- Search functionality bugs
+- Input validation failures
+
+## Incidents
+
+<Accordion title="INC-007: SQL injection vulnerability in product search">
+
+### Incident Details
+
+- **Severity**: P0 - Critical Security
+- **Service**: python-service
+- **Environment**: All
+- **Reported**: 2026-02-28T06:00:00Z
+- **Status**: Resolved
+- **CVE**: CVE-2026-XXXXX (OWASP Top 10: A03:2021 – Injection)
+
+### Problem
+
+A critical SQL injection vulnerability was discovered in the `GET /api/products/search` endpoint during a penetration test. The search query parameter was being interpolated directly into a raw SQL query without parameterization, allowing attackers to:
+
+- Extract all products regardless of search criteria
+- Access sensitive user data including password hashes
+- Modify or delete database records
+- Execute arbitrary SQL commands
+
+**Attack Examples:**
+```bash
+# Return all products instead of search results
+GET /api/products/search?q=test' OR '1'='1
+
+# Extract user credentials
+GET /api/products/search?q=test' UNION SELECT id,email,password_hash,null,null FROM users--
+
+# Drop tables (if permissions allow)
+GET /api/products/search?q=test'; DROP TABLE products;--
+```
+
+### Root Cause
+
+The search endpoint used Python f-string formatting to construct a raw SQL query, directly interpolating user input without any sanitization or parameterization. This is a classic SQL injection vulnerability.
+
+**Location**: `app/routes/products.py:42-63`
+
+### Problematic Code
+
+```python products.py
+@products_bp.route("/search", methods=["GET"])
+def search_products():
+    query = request.args.get("q", "")
+    
+    if not query:
+        return jsonify({"error": "Search query parameter 'q' is required"}), 400
+    
+    # CRITICAL VULNERABILITY: Direct string interpolation!
+    sql = f"SELECT * FROM products WHERE name LIKE '%{query}%' OR description LIKE '%{query}%'"
+    results = db.session.execute(db.text(sql))
+    
+    products = []
+    for row in results:
+        products.append({
+            "id": row[0],
+            "name": row[1],
+            "description": row[2],
+            "price": float(row[3]),
+            "stock": row[4],
+            "category": row[5],
+        })
+    
+    return jsonify({"products": products, "count": len(products)}), 200
+```
+
+**Why this is dangerous:**
+```python
+# User input: test' OR '1'='1
+query = "test' OR '1'='1"
+
+# Resulting SQL:
+sql = f"SELECT * FROM products WHERE name LIKE '%test' OR '1'='1%' OR ..."
+# The OR '1'='1 makes the WHERE clause always true, returning all products
+
+# User input: test' UNION SELECT id,email,password_hash,null,null FROM users--
+query = "test' UNION SELECT id,email,password_hash,null,null FROM users--"
+
+# Resulting SQL:
+sql = f"SELECT * FROM products WHERE name LIKE '%test' UNION SELECT id,email,password_hash,null,null FROM users--%'..."
+# The UNION injects a second query that returns user credentials
+# The -- comments out the rest of the original query
+```
+
+### Resolution
+
+Use SQLAlchemy's ORM or parameterized queries to prevent SQL injection:
+
+#### Solution 1: Use SQLAlchemy ORM (Recommended)
+
+```python products.py
+from sqlalchemy import or_
+
+@products_bp.route("/search", methods=["GET"])
+def search_products():
+    query = request.args.get("q", "")
+    
+    if not query:
+        return jsonify({"error": "Search query parameter 'q' is required"}), 400
+    
+    # Safe: Use ORM with parameterized queries
+    search_pattern = f"%{query}%"
+    products = Product.query.filter(
+        or_(
+            Product.name.ilike(search_pattern),
+            Product.description.ilike(search_pattern)
+        )
+    ).all()
+    
+    return jsonify({
+        "products": [p.to_dict() for p in products],
+        "count": len(products)
+    }), 200
+```
+
+#### Solution 2: Use Parameterized Raw SQL
+
+If raw SQL is necessary, use parameterized queries:
+
+```python products.py
+from sqlalchemy import text
+
+@products_bp.route("/search", methods=["GET"])
+def search_products():
+    query = request.args.get("q", "")
+    
+    if not query:
+        return jsonify({"error": "Search query parameter 'q' is required"}), 400
+    
+    # Safe: Use parameterized query with :param syntax
+    search_pattern = f"%{query}%"
+    sql = text("""
+        SELECT id, name, description, price, stock, category 
+        FROM products 
+        WHERE name ILIKE :pattern OR description ILIKE :pattern
+    """)
+    
+    results = db.session.execute(sql, {"pattern": search_pattern})
+    
+    products = []
+    for row in results:
+        products.append({
+            "id": row.id,
+            "name": row.name,
+            "description": row.description,
+            "price": float(row.price),
+            "stock": row.stock,
+            "category": row.category,
+        })
+    
+    return jsonify({"products": products, "count": len(products)}), 200
+```
+
+### Additional Security Measures
+
+#### 1. Input Validation
+
+```python products.py
+import re
+
+def validate_search_query(query):
+    """Validate and sanitize search query input.
+    
+    Args:
+        query: User-provided search query
+        
+    Returns:
+        Sanitized query string
+        
+    Raises:
+        ValueError: If query contains suspicious patterns
+    """
+    if not query:
+        raise ValueError("Search query cannot be empty")
+    
+    # Limit length
+    if len(query) > 100:
+        raise ValueError("Search query too long")
+    
+    # Check for SQL keywords (defense in depth)
+    suspicious_patterns = [
+        r'\bUNION\b', r'\bSELECT\b', r'\bDROP\b', 
+        r'\bDELETE\b', r'\bUPDATE\b', r'\bINSERT\b',
+        r'--', r'/\*', r'\*/'
+    ]
+    
+    for pattern in suspicious_patterns:
+        if re.search(pattern, query, re.IGNORECASE):
+            raise ValueError(f"Query contains forbidden pattern: {pattern}")
+    
+    return query
+
+@products_bp.route("/search", methods=["GET"])
+def search_products():
+    query = request.args.get("q", "")
+    
+    try:
+        query = validate_search_query(query)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    
+    # ... rest of search logic using ORM ...
+```
+
+#### 2. Database User Permissions
+
+Ensure the application database user has minimal permissions:
+
+```sql
+-- Create read-only user for search operations
+CREATE USER search_user WITH PASSWORD 'secure_password';
+
+-- Grant only SELECT on specific tables
+GRANT SELECT ON products TO search_user;
+
+-- Do NOT grant:
+-- - INSERT, UPDATE, DELETE permissions
+-- - Access to users table
+-- - DDL permissions (CREATE, DROP, ALTER)
+```
+
+#### 3. Rate Limiting
+
+```python products.py
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+@products_bp.route("/search", methods=["GET"])
+@limiter.limit("30 per minute")  # Limit search requests
+def search_products():
+    # ... search logic ...
+```
+
+### Prevention
+
+1. **Never use string interpolation for SQL**: Always use ORM or parameterized queries
+2. **Code review**: Flag any use of `f"SELECT ...{variable}"` or `.format()` with SQL
+3. **Static analysis**: Use tools like `bandit` to detect SQL injection vulnerabilities
+4. **Penetration testing**: Regular security audits and pen tests
+5. **Input validation**: Validate and sanitize all user input (defense in depth)
+6. **Principle of least privilege**: Database users should have minimal required permissions
+7. **Security training**: Educate developers on OWASP Top 10 vulnerabilities
+
+### Detection Tools
+
+#### Bandit Security Scanner
+
+```bash
+# Install bandit
+pip install bandit
+
+# Scan for SQL injection vulnerabilities
+bandit -r app/ -f json -o security-report.json
+```
+
+```python
+# Bandit will flag this as high severity:
+sql = f"SELECT * FROM products WHERE name LIKE '%{query}%'"  # [B608:hardcoded_sql_expressions]
+```
+
+#### Pre-commit Hook
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: ['-lll', '-i']  # Only report high severity issues
+```
+
+### Testing for SQL Injection
+
+```python
+import pytest
+from flask import json
+
+class TestProductSearchSecurity:
+    """Test product search endpoint for SQL injection vulnerabilities."""
+    
+    def test_sql_injection_or_attack(self, client):
+        """Verify OR 1=1 attack doesn't return all products."""
+        # Create test products
+        create_product("Test Product")
+        create_product("Other Product")
+        
+        # Attempt SQL injection
+        response = client.get("/api/products/search?q=test' OR '1'='1")
+        data = json.loads(response.data)
+        
+        # Should only return products matching 'test', not all products
+        assert response.status_code == 200
+        assert len(data["products"]) <= 1  # Only "Test Product"
+    
+    def test_sql_injection_union_attack(self, client):
+        """Verify UNION attack doesn't leak user data."""
+        response = client.get(
+            "/api/products/search?q=test' UNION SELECT id,email,password_hash,null,null FROM users--"
+        )
+        data = json.loads(response.data)
+        
+        # Should not return user data
+        for product in data.get("products", []):
+            assert "@" not in str(product.get("name", ""))  # No email addresses
+            assert "password" not in product  # No password fields
+    
+    def test_sql_injection_comment_attack(self, client):
+        """Verify comment-based attacks are handled."""
+        response = client.get("/api/products/search?q=test'--")
+        # Should handle gracefully without exposing errors
+        assert response.status_code in [200, 400]
+    
+    def test_search_with_special_characters(self, client):
+        """Verify special characters are handled safely."""
+        special_chars = ["'", '"', ";", "--", "/*", "*/", "xp_", "sp_"]
+        
+        for char in special_chars:
+            response = client.get(f"/api/products/search?q=test{char}")
+            # Should not cause 500 errors
+            assert response.status_code != 500
+```
+
+</Accordion>
+
+## Common Patterns
+
+### Safe Query Construction
+
+```python
+from sqlalchemy import or_, and_
+from app.models.product import Product
+
+# SAFE: Using ORM
+def search_products_safe(search_term, category=None, min_price=None, max_price=None):
+    """Safe product search using SQLAlchemy ORM."""
+    query = Product.query
+    
+    # Text search
+    if search_term:
+        search_pattern = f"%{search_term}%"
+        query = query.filter(
+            or_(
+                Product.name.ilike(search_pattern),
+                Product.description.ilike(search_pattern)
+            )
+        )
+    
+    # Category filter
+    if category:
+        query = query.filter(Product.category == category)
+    
+    # Price range
+    if min_price is not None:
+        query = query.filter(Product.price >= min_price)
+    if max_price is not None:
+        query = query.filter(Product.price <= max_price)
+    
+    return query.all()
+
+# UNSAFE: Never do this
+def search_products_unsafe(search_term):
+    """DANGEROUS: SQL injection vulnerability!"""
+    sql = f"SELECT * FROM products WHERE name LIKE '%{search_term}%'"  # NEVER!
+    return db.session.execute(db.text(sql))
+```
+
+### Parameterized Raw SQL (When Necessary)
+
+```python
+from sqlalchemy import text
+
+def complex_product_query(search_term, min_rating):
+    """Example of safe raw SQL with parameters."""
+    sql = text("""
+        SELECT p.*, AVG(r.rating) as avg_rating
+        FROM products p
+        LEFT JOIN reviews r ON p.id = r.product_id
+        WHERE (p.name ILIKE :search OR p.description ILIKE :search)
+        GROUP BY p.id
+        HAVING AVG(r.rating) >= :min_rating
+        ORDER BY avg_rating DESC
+    """)
+    
+    # Safe: Parameters are properly escaped
+    results = db.session.execute(sql, {
+        "search": f"%{search_term}%",
+        "min_rating": min_rating
+    })
+    
+    return results.fetchall()
+```
+
+### Input Validation Decorator
+
+```python
+from functools import wraps
+import re
+from flask import request, jsonify
+
+def validate_search_input(max_length=100):
+    """Decorator to validate search input."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            query = request.args.get('q', '')
+            
+            # Length check
+            if len(query) > max_length:
+                return jsonify({"error": "Search query too long"}), 400
+            
+            # Pattern check (defense in depth)
+            forbidden = [r'\bUNION\b', r'\bSELECT\b', r'--', r'/\*']
+            for pattern in forbidden:
+                if re.search(pattern, query, re.IGNORECASE):
+                    return jsonify({"error": "Invalid search query"}), 400
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+@products_bp.route("/search", methods=["GET"])
+@validate_search_input(max_length=100)
+def search_products():
+    query = request.args.get("q", "")
+    # ... safe search implementation ...
+```
+
+## Security Checklist
+
+### Code Review Checklist
+
+- [ ] No string interpolation (`f"SELECT ... {var}"`) in SQL queries
+- [ ] No `.format()` used with SQL queries
+- [ ] All raw SQL uses parameterized queries (`:param` syntax)
+- [ ] ORM used when possible instead of raw SQL
+- [ ] Input validation on all user-provided data
+- [ ] No sensitive data in error messages
+- [ ] Rate limiting on search endpoints
+- [ ] Database user has minimal required permissions
+
+### Testing Checklist
+
+- [ ] Test SQL injection with `' OR '1'='1`
+- [ ] Test UNION attacks
+- [ ] Test comment-based attacks (`--`, `/**/`)
+- [ ] Test special characters in search terms
+- [ ] Test excessively long input
+- [ ] Verify error messages don't leak SQL structure
+
+### Deployment Checklist
+
+- [ ] Static analysis tools (bandit) in CI pipeline
+- [ ] Regular penetration testing scheduled
+- [ ] Security headers configured (CSP, X-Frame-Options, etc.)
+- [ ] Database connection uses least-privilege user
+- [ ] Logging of suspicious query patterns
+- [ ] Rate limiting enabled
+
+## Quick Reference
+
+| Vulnerability | Attack Example | Prevention |
+|---------------|----------------|------------|
+| SQL Injection | `' OR '1'='1` | Use ORM or parameterized queries |
+| UNION Attack | `' UNION SELECT ...` | Never interpolate user input in SQL |
+| Comment Injection | `test'--` | Input validation + parameterized queries |
+| Blind SQL Injection | `' AND SLEEP(5)--` | Use ORM, monitor slow queries |
+
+## Tools & Resources
+
+### Security Scanning Tools
+
+```bash
+# Bandit - Python security scanner
+pip install bandit
+bandit -r app/ -ll  # Show medium and high severity issues
+
+# SQLMap - SQL injection testing tool
+sqlmap -u "http://localhost:5000/api/products/search?q=test" --batch
+
+# Safety - Check dependencies for known vulnerabilities
+pip install safety
+safety check --json
+```
+
+### Recommended Libraries
+
+- **SQLAlchemy**: ORM with built-in SQL injection protection
+- **Flask-Limiter**: Rate limiting to prevent abuse
+- **Flask-Talisman**: Security headers for Flask apps
+- **python-decouple**: Secure configuration management
+
+## See Also
+
+- [Authentication Errors](/incidents/python/authentication-errors)
+- [Order Management Issues](/incidents/python/order-management)
+- [Payment Processing Issues](/incidents/python/payment-processing)
+- OWASP Top 10: https://owasp.org/www-project-top-ten/
+- SQLAlchemy Security: https://docs.sqlalchemy.org/en/20/faq/security.html

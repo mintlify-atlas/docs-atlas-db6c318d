@@ -1,0 +1,408 @@
+---
+title: 'Node.js Test Suite'
+description: 'Jest-based testing for the Node.js Express service'
+---
+
+## Overview
+
+The Node.js service uses **Jest** as the testing framework with **Supertest** for HTTP endpoint testing and **Sequelize** for database management. Tests run against a test database that is synchronized before each test suite.
+
+## Jest Configuration
+
+### jest.config.js
+
+```javascript
+module.exports = {
+  testEnvironment: "node",
+  testMatch: ["**/tests/**/*.test.js"],
+  setupFilesAfterEnv: [],
+  verbose: true,
+};
+```
+
+**Configuration Details**:
+- **testEnvironment**: Node.js environment (not browser)
+- **testMatch**: Finds all files ending in `.test.js` in the `tests/` directory
+- **verbose**: Displays individual test results
+
+### Test Setup (setup.js)
+
+Global setup and teardown for all tests:
+
+```javascript
+const { sequelize } = require("../src/models");
+
+beforeAll(async () => {
+  await sequelize.sync({ force: true });
+});
+
+afterAll(async () => {
+  await sequelize.close();
+});
+```
+
+**Setup Process**:
+- `beforeAll`: Synchronizes database schema (drops and recreates tables)
+- `afterAll`: Closes database connection
+
+## Test Files
+
+### auth.test.js - Authentication Tests
+
+Tests for user registration and login functionality.
+
+**Setup**:
+
+```javascript
+beforeAll(async () => {
+  await sequelize.sync({ force: true });
+});
+
+afterAll(async () => {
+  await sequelize.close();
+});
+
+beforeEach(async () => {
+  await User.destroy({ where: {} }); // Clear users before each test
+});
+```
+
+**Example Test**:
+
+```javascript
+describe("User Registration", () => {
+  test("should register user with valid data", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({
+        email: "test@example.com",
+        password: "password123",
+        name: "Test User",
+      });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.user.email).toBe("test@example.com");
+    expect(res.body.token).toBeDefined();
+  });
+});
+```
+
+**Coverage**:
+- Registration with valid data
+- Email validation (plus addressing: `user+tag@example.com`)
+- Email validation (dots: `first.middle.last@example.com`)
+- Missing password rejection
+- Duplicate email prevention (409 status)
+- Login with valid credentials
+- Invalid password rejection (401 status)
+- Non-existent email handling
+
+### users.test.js - User Profile Tests
+
+Tests for user profile retrieval and management.
+
+**Setup with Authentication**:
+
+```javascript
+let authToken;
+let testUserId;
+
+beforeAll(async () => {
+  await sequelize.sync({ force: true });
+
+  // Register a test user
+  const res = await request(app)
+    .post("/api/auth/register")
+    .send({
+      email: "usertest@example.com",
+      password: "password123",
+      name: "User Test",
+    });
+
+  authToken = res.body.token;
+  testUserId = res.body.user.id;
+});
+```
+
+**Example Test**:
+
+```javascript
+describe("GET /api/users/:id", () => {
+  test("should return user by ID", async () => {
+    const res = await request(app)
+      .get(`/api/users/${testUserId}`)
+      .set("Authorization", `Bearer ${authToken}`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user.email).toBe("usertest@example.com");
+  });
+
+  test("should return 404 for non-existent user", async () => {
+    const res = await request(app)
+      .get("/api/users/99999")
+      .set("Authorization", `Bearer ${authToken}`);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBeDefined();
+  });
+});
+```
+
+**Coverage**:
+- User retrieval by ID
+- 404 for non-existent users
+- Profile retrieval for users without profile data
+- Profile retrieval after profile is set
+- Profile update functionality
+- Authentication requirement
+
+### products.test.js - Product Management Tests
+
+Tests for product listing, pagination, search, and creation.
+
+**Setup with Seed Data**:
+
+```javascript
+beforeAll(async () => {
+  await sequelize.sync({ force: true });
+
+  // Get auth token
+  const res = await request(app)
+    .post("/api/auth/register")
+    .send({
+      email: "producttest@example.com",
+      password: "password123",
+      name: "Product Test",
+    });
+  authToken = res.body.token;
+
+  // Seed 25 products
+  const products = [];
+  for (let i = 1; i <= 25; i++) {
+    products.push({
+      name: `Product ${i}`,
+      description: `Description for product ${i}`,
+      price: (i * 10.99).toFixed(2),
+      stock: i * 5,
+      category: i % 3 === 0 ? "electronics" : i % 2 === 0 ? "clothing" : "books",
+    });
+  }
+  await Product.bulkCreate(products);
+});
+```
+
+**Example Test**:
+
+```javascript
+describe("GET /api/products", () => {
+  test("should return first page correctly", async () => {
+    const res = await request(app).get("/api/products?page=1&limit=5");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.products.length).toBe(5);
+    expect(res.body.page).toBe(1);
+    expect(res.body.totalPages).toBe(5);
+  });
+
+  test("should return correct products on page 2", async () => {
+    const page1 = await request(app).get("/api/products?page=1&limit=5");
+    const page2 = await request(app).get("/api/products?page=2&limit=5");
+
+    expect(page2.statusCode).toBe(200);
+
+    // Pages should not overlap
+    const page1Ids = page1.body.products.map((p) => p.id);
+    const page2Ids = page2.body.products.map((p) => p.id);
+    const overlap = page1Ids.filter((id) => page2Ids.includes(id));
+    expect(overlap.length).toBe(0);
+  });
+});
+```
+
+**Coverage**:
+- Product listing with default pagination
+- First page retrieval
+- Page 2 retrieval (no overlap verification)
+- Product search by name
+- 400 error for missing search query
+- Product retrieval by ID
+- 404 for non-existent products
+- Product creation (authenticated)
+- Validation for missing required fields
+- 401 for unauthenticated creation attempts
+
+### formatters.test.js - Utility Function Tests
+
+Unit tests for formatting and pagination utilities.
+
+**Example Tests**:
+
+```javascript
+const { formatUserResponse, formatProductResponse, paginate } = require("../src/utils/formatters");
+
+describe("paginate", () => {
+  test("page 1 should have offset 0", () => {
+    const result = paginate(1, 10);
+    expect(result.offset).toBe(0);
+    expect(result.limit).toBe(10);
+    expect(result.page).toBe(1);
+  });
+
+  test("page 2 should have offset equal to limit", () => {
+    const result = paginate(2, 10);
+    expect(result.offset).toBe(10);
+    expect(result.limit).toBe(10);
+  });
+
+  test("should default to page 1 and limit 10", () => {
+    const result = paginate(undefined, undefined);
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(10);
+    expect(result.offset).toBe(0);
+  });
+});
+```
+
+**Coverage**:
+- Pagination offset calculation
+- Default pagination values
+- User response formatting with profile
+- User response formatting without profile
+- Product response formatting
+- Price type conversion (string to number)
+
+## Running Node.js Tests
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    cd node-service
+    npm install
+    ```
+  </Step>
+
+  <Step title="Run all tests">
+    ```bash
+    npm test
+    ```
+
+    This runs: `jest --verbose`
+  </Step>
+
+  <Step title="Run tests in watch mode">
+    ```bash
+    npm test -- --watch
+    ```
+
+    Automatically reruns tests when files change.
+  </Step>
+
+  <Step title="Run specific test file">
+    ```bash
+    npm test -- tests/auth.test.js
+    ```
+  </Step>
+
+  <Step title="Run tests with coverage">
+    ```bash
+    npm test -- --coverage
+    ```
+
+    Generates coverage report showing tested code percentage.
+  </Step>
+</Steps>
+
+## Test Output Example
+
+```bash
+ PASS  tests/auth.test.js
+  User Registration
+    ✓ should register user with valid data (234ms)
+    ✓ should accept valid email with plus addressing (89ms)
+    ✓ should accept valid email with dots (87ms)
+    ✓ should reject registration without password (45ms)
+    ✓ should reject duplicate email (123ms)
+  User Login
+    ✓ should login with valid credentials (156ms)
+    ✓ should reject invalid password (98ms)
+    ✓ should reject non-existent email (67ms)
+
+ PASS  tests/users.test.js
+  GET /api/users/:id
+    ✓ should return user by ID (123ms)
+    ✓ should return 404 for non-existent user (45ms)
+
+ PASS  tests/products.test.js
+  GET /api/products
+    ✓ should list products with default pagination (156ms)
+    ✓ should return first page correctly (134ms)
+
+Test Suites: 4 passed, 4 total
+Tests:       28 passed, 28 total
+Snapshots:   0 total
+Time:        4.567 s
+```
+
+## Common Jest Matchers
+
+<AccordionGroup>
+  <Accordion title="Equality Matchers">
+    ```javascript
+    expect(value).toBe(expected);           // Strict equality (===)
+    expect(value).toEqual(expected);        // Deep equality
+    expect(value).toBeDefined();            // Not undefined
+    expect(value).toBeNull();               // Null value
+    ```
+  </Accordion>
+
+  <Accordion title="Comparison Matchers">
+    ```javascript
+    expect(value).toBeGreaterThan(3);
+    expect(value).toBeLessThan(10);
+    expect(value).toBeGreaterThanOrEqual(5);
+    expect(value).toBeLessThanOrEqual(5);
+    ```
+  </Accordion>
+
+  <Accordion title="String Matchers">
+    ```javascript
+    expect(string).toContain("substring");
+    expect(string).toMatch(/regex/);
+    ```
+  </Accordion>
+
+  <Accordion title="Array Matchers">
+    ```javascript
+    expect(array).toHaveLength(5);
+    expect(array).toContain(item);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<Warning>
+  Always clean up database state in `beforeEach` or `afterEach` hooks to ensure test isolation.
+</Warning>
+
+<Tip>
+  Use descriptive test names that read like documentation: `"should return 404 for non-existent user"`
+</Tip>
+
+<Note>
+  Supertest automatically handles server lifecycle - no need to manually start/stop the Express server.
+</Note>
+
+## Debugging Tests
+
+To debug a specific test:
+
+```bash
+# Run with Node debugger
+node --inspect-brk node_modules/.bin/jest tests/auth.test.js
+
+# Run only one test (add .only)
+test.only("should register user", async () => {
+  // This test will run alone
+});
+```

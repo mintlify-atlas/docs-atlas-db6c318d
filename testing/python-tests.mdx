@@ -1,0 +1,304 @@
+---
+title: 'Python Test Suite'
+description: 'pytest-based testing for the Python Flask service'
+---
+
+## Overview
+
+The Python service uses **pytest** as the testing framework with SQLAlchemy database fixtures for test isolation. All tests run against a test database that is created fresh for each test function.
+
+## Pytest Configuration
+
+### Test Fixtures (conftest.py)
+
+The `tests/conftest.py` file defines reusable fixtures:
+
+```python
+@pytest.fixture(scope="session")
+def app():
+    """Create application for testing."""
+    app = create_app("testing")
+    return app
+
+@pytest.fixture(scope="function")
+def db(app):
+    """Create a fresh database for each test."""
+    with app.app_context():
+        _db.create_all()
+        yield _db
+        _db.session.rollback()
+        _db.drop_all()
+
+@pytest.fixture
+def client(app, db):
+    """Create a test client."""
+    return app.test_client()
+```
+
+### Available Fixtures
+
+<AccordionGroup>
+  <Accordion title="app">
+    Application instance configured for testing environment.
+    
+    **Scope**: Session (created once per test session)
+  </Accordion>
+
+  <Accordion title="db">
+    Fresh database instance with all tables created.
+    
+    **Scope**: Function (recreated for each test)
+    
+    **Cleanup**: Automatically rolls back and drops all tables after each test
+  </Accordion>
+
+  <Accordion title="client">
+    Flask test client for making HTTP requests.
+    
+    **Usage**: `client.get()`, `client.post()`, etc.
+  </Accordion>
+
+  <Accordion title="sample_user">
+    Pre-created user with credentials:
+    - Email: `test@example.com`
+    - Password: `testpassword123`
+    - Name: `Test User`
+  </Accordion>
+
+  <Accordion title="sample_products">
+    List of 5 products across different categories:
+    - Widget A ($29.99) - widgets category
+    - Widget B ($49.99) - widgets category
+    - Gadget X ($199.99) - gadgets category
+    - Gadget Y ($299.99) - gadgets category
+    - Tool Z ($15.99) - tools category
+  </Accordion>
+
+  <Accordion title="auth_token">
+    JWT access token for the sample user.
+    
+    **Usage**: Add to request headers:
+    ```python
+    headers={"Authorization": f"Bearer {auth_token}"}
+    ```
+  </Accordion>
+
+  <Accordion title="sample_orders">
+    5 pre-created orders with items for the sample user.
+  </Accordion>
+</AccordionGroup>
+
+## Test Files
+
+### test_auth.py - Authentication Tests
+
+Tests for user registration and login endpoints.
+
+**Example Test**:
+
+```python
+class TestRegistration:
+    def test_register_success(self, client):
+        """Should register a new user successfully."""
+        response = client.post(
+            "/api/auth/register",
+            data=json.dumps({
+                "email": "newuser@example.com",
+                "password": "securepassword123",
+                "name": "New User",
+            }),
+            content_type="application/json",
+        )
+        assert response.status_code == 201
+        data = response.get_json()
+        assert data["user"]["email"] == "newuser@example.com"
+        assert "access_token" in data
+```
+
+**Coverage**:
+- Successful registration with valid data
+- Missing required fields validation
+- Duplicate email prevention (409 conflict)
+- Successful login with valid credentials
+- Invalid password rejection (401 unauthorized)
+- Non-existent user handling
+
+### test_products.py - Product Tests
+
+Tests for product listing, search, and creation.
+
+**Example Test**:
+
+```python
+class TestProductListing:
+    def test_list_products_by_category(self, client, sample_products):
+        """Should filter products by category."""
+        response = client.get("/api/products/?category=widgets")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert len(data["products"]) == 2
+```
+
+**Coverage**:
+- Product listing with pagination
+- Category filtering
+- Search functionality
+- Product retrieval by ID
+- Product creation (requires authentication)
+- SQL injection prevention in search
+- 404 handling for non-existent products
+
+### test_orders.py - Order Tests
+
+Tests for order creation and management.
+
+**Example Test**:
+
+```python
+class TestOrderCreation:
+    def test_create_order_with_discount(self, client, auth_token, sample_products):
+        """Should apply discount code to order."""
+        response = client.post(
+            "/api/orders/",
+            data=json.dumps({
+                "items": [
+                    {"product_id": sample_products[2].id, "quantity": 1},
+                ],
+                "discount_code": "SAVE20",
+            }),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        assert response.status_code == 201
+        data = response.get_json()
+        assert data["order"]["discount_amount"] == 40.0
+```
+
+**Coverage**:
+- Order creation with multiple items
+- Stock validation (insufficient stock handling)
+- Discount code application
+- Empty order rejection
+- Order listing for authenticated users
+- Single order retrieval
+- Non-existent product handling
+
+### test_payments.py - Payment Tests
+
+Tests for payment calculation and checkout processing.
+
+**Example Test**:
+
+```python
+class TestTaxCalculation:
+    def test_calculate_tax_standard_amount(self):
+        """Should calculate 8.5% tax on $200.00."""
+        tax = calculate_tax(200.00)
+        assert tax == 17.0  # 200 * 0.085 = 17.0
+```
+
+**Coverage**:
+- Tax calculation at 8.5% rate
+- Percentage discount application (SAVE20 = 20% off)
+- Flat discount application (FLAT5 = $5 off)
+- Invalid discount code handling
+- Payment total calculation
+- Checkout flow completion
+- Order status update to "paid"
+
+### test_security.py - Security Tests
+
+Tests for SQL injection prevention and security vulnerabilities.
+
+**Example Test**:
+
+```python
+class TestSQLInjection:
+    def test_search_with_union_select(self, client, sample_products):
+        """Should not be vulnerable to UNION-based SQL injection."""
+        response = client.get(
+            "/api/products/search?q=x' UNION SELECT 1,2,3,4,5,6--"
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        # Verify no injected data is returned
+        for product in data.get("products", []):
+            assert isinstance(product["name"], str)
+            assert product["name"] != "2"  # Injected value
+```
+
+**Coverage**:
+- Single quote handling in search
+- UNION-based SQL injection prevention
+- Boolean-based SQL injection prevention
+- Input sanitization verification
+
+## Running Python Tests
+
+<Steps>
+  <Step title="Activate virtual environment">
+    ```bash
+    cd python-service
+    source venv/bin/activate
+    ```
+  </Step>
+
+  <Step title="Run all tests">
+    ```bash
+    python -m pytest tests/ -v
+    ```
+
+    **Options**:
+    - `-v`: Verbose output with test names
+    - `--tb=short`: Shorter traceback format
+    - `-k <pattern>`: Run tests matching pattern
+    - `-x`: Stop after first failure
+  </Step>
+
+  <Step title="Run specific test file">
+    ```bash
+    python -m pytest tests/test_auth.py -v
+    ```
+  </Step>
+
+  <Step title="Run specific test class or function">
+    ```bash
+    # Run all tests in TestRegistration class
+    python -m pytest tests/test_auth.py::TestRegistration -v
+
+    # Run specific test function
+    python -m pytest tests/test_auth.py::TestRegistration::test_register_success -v
+    ```
+  </Step>
+</Steps>
+
+## Test Output Example
+
+```bash
+========================= test session starts =========================
+platform linux -- Python 3.11.0, pytest-7.4.0
+rootdir: /path/to/python-service
+collected 25 items
+
+tests/test_auth.py::TestRegistration::test_register_success PASSED
+tests/test_auth.py::TestRegistration::test_register_missing_fields PASSED
+tests/test_auth.py::TestRegistration::test_register_duplicate_email PASSED
+tests/test_auth.py::TestLogin::test_login_success PASSED
+tests/test_auth.py::TestLogin::test_login_wrong_password PASSED
+
+========================= 25 passed in 2.34s =========================
+```
+
+## Best Practices
+
+<Warning>
+  Each test should be independent and not rely on the state from other tests. The `db` fixture ensures database isolation.
+</Warning>
+
+<Tip>
+  Use descriptive test names that explain what the test verifies. Follow the pattern: `test_<action>_<expected_result>`
+</Tip>
+
+<Note>
+  The test database is automatically created and destroyed for each test function, ensuring complete isolation.
+</Note>

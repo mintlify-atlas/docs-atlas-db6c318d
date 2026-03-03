@@ -1,0 +1,438 @@
+---
+title: Report Generation Issues
+description: Node.js service incidents related to report generation and processing
+---
+
+This page documents incidents related to report generation in the Node.js service, particularly focusing on event loop blocking and performance issues.
+
+## Overview
+
+Report generation incidents typically involve:
+- Synchronous file I/O blocking the event loop
+- CPU-intensive operations blocking concurrent requests
+- Memory issues with large data processing
+
+## Incidents
+
+<Accordion title="INC-105: Event Loop Blocked by Synchronous File Read">
+
+### Summary
+
+**Severity:** P2 - High  
+**Service:** node-service  
+**Date:** 2026-02-28  
+**Environment:** Production
+
+The `/api/reports/sales` endpoint blocked the entire Node.js event loop for 3-5 seconds on each request. During this time, all other requests were queued, causing timeouts across the service.
+
+### Problem
+
+Monitoring showed:
+- Event loop lag: 3200ms (threshold: 100ms)
+- p99 latency spike across ALL endpoints during report generation
+- Thread pool utilization: 100%
+
+When one user requested a report, all other users experienced request timeouts, even for simple endpoints like `/api/health`.
+
+### Root Cause
+
+The report generation used `fs.readFileSync()` to load a large HTML email template on every request. This synchronous file I/O operation blocked the single-threaded Node.js event loop.
+
+**Problematic code** (src/routes/reports.js:11-52):
+```javascript
+const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "report.html");
+
+router.get("/sales", authenticate, async (req, res) => {
+  try {
+    // Fetch order data
+    const orders = await Order.findAll({
+      where: { status: "paid" },
+      order: [["createdAt", "DESC"]],
+      limit: 100,
+    });
+
+    // BLOCKING OPERATION - stops all request processing!
+    let template = fs.readFileSync(TEMPLATE_PATH, "utf-8");
+
+    // Generate report data
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + parseFloat(order.total),
+      0
+    );
+    const orderCount = orders.length;
+
+    template = template
+      .replace("{{totalRevenue}}", totalRevenue.toFixed(2))
+      .replace("{{orderCount}}", orderCount)
+      .replace("{{generatedAt}}", new Date().toISOString());
+
+    const orderRows = orders
+      .map(
+        (order) =>
+          `<tr><td>${order.id}</td><td>$${parseFloat(order.total).toFixed(
+            2
+          )}</td><td>${order.status}</td><td>${order.createdAt}</td></tr>`
+      )
+      .join("\n");
+    template = template.replace("{{orderRows}}", orderRows);
+
+    res.type("html").send(template);
+  } catch (error) {
+    console.error("Report generation error:", error);
+    res.status(500).json({ error: "Failed to generate report" });
+  }
+});
+```
+
+**Why this blocks the event loop:**
+- Node.js is single-threaded
+- `fs.readFileSync()` is synchronous - it blocks until the file is completely read
+- During this time, no other JavaScript can execute
+- All incoming requests queue up waiting for the event loop to be free
+
+### Resolution
+
+**Solution 1: Use async file operations**
+
+Replace `fs.readFileSync()` with async `fs.promises.readFile()`:
+
+```javascript
+const fs = require("fs/promises");
+const path = require("path");
+
+const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "report.html");
+
+router.get("/sales", authenticate, async (req, res) => {
+  try {
+    const orders = await Order.findAll({
+      where: { status: "paid" },
+      order: [["createdAt", "DESC"]],
+      limit: 100,
+    });
+
+    // NON-BLOCKING async file read
+    let template = await fs.readFile(TEMPLATE_PATH, "utf-8");
+
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + parseFloat(order.total),
+      0
+    );
+    const orderCount = orders.length;
+
+    template = template
+      .replace("{{totalRevenue}}", totalRevenue.toFixed(2))
+      .replace("{{orderCount}}", orderCount)
+      .replace("{{generatedAt}}", new Date().toISOString());
+
+    const orderRows = orders
+      .map(
+        (order) =>
+          `<tr><td>${order.id}</td><td>$${parseFloat(order.total).toFixed(
+            2
+          )}</td><td>${order.status}</td><td>${order.createdAt}</td></tr>`
+      )
+      .join("\n");
+    template = template.replace("{{orderRows}}", orderRows);
+
+    res.type("html").send(template);
+  } catch (error) {
+    console.error("Report generation error:", error);
+    res.status(500).json({ error: "Failed to generate report" });
+  }
+});
+```
+
+**Solution 2: Cache the template (even better)**
+
+Load the template once at startup and cache it in memory:
+
+```javascript
+const fs = require("fs/promises");
+const path = require("path");
+
+const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "report.html");
+let templateCache = null;
+
+// Load template at startup
+async function loadTemplate() {
+  if (!templateCache) {
+    templateCache = await fs.readFile(TEMPLATE_PATH, "utf-8");
+  }
+  return templateCache;
+}
+
+// Initialize template when module loads
+loadTemplate().catch(err => console.error("Failed to load template:", err));
+
+router.get("/sales", authenticate, async (req, res) => {
+  try {
+    const orders = await Order.findAll({
+      where: { status: "paid" },
+      order: [["createdAt", "DESC"]],
+      limit: 100,
+    });
+
+    // Use cached template - no file I/O!
+    let template = await loadTemplate();
+
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + parseFloat(order.total),
+      0
+    );
+    const orderCount = orders.length;
+
+    template = template
+      .replace("{{totalRevenue}}", totalRevenue.toFixed(2))
+      .replace("{{orderCount}}", orderCount)
+      .replace("{{generatedAt}}", new Date().toISOString());
+
+    const orderRows = orders
+      .map(
+        (order) =>
+          `<tr><td>${order.id}</td><td>$${parseFloat(order.total).toFixed(
+            2
+          )}</td><td>${order.status}</td><td>${order.createdAt}</td></tr>`
+      )
+      .join("\n");
+    template = template.replace("{{orderRows}}", orderRows);
+
+    res.type("html").send(template);
+  } catch (error) {
+    console.error("Report generation error:", error);
+    res.status(500).json({ error: "Failed to generate report" });
+  }
+});
+```
+
+**Solution 3: Use a worker thread for CPU-intensive work**
+
+For very large reports, offload to a worker thread:
+
+```javascript
+const { Worker } = require('worker_threads');
+
+router.get("/sales", authenticate, async (req, res) => {
+  try {
+    const orders = await Order.findAll({
+      where: { status: "paid" },
+      order: [["createdAt", "DESC"]],
+      limit: 100,
+    });
+
+    // Offload report generation to worker thread
+    const worker = new Worker('./workers/reportGenerator.js', {
+      workerData: { orders: orders.map(o => o.toJSON()) }
+    });
+
+    worker.on('message', (html) => {
+      res.type('html').send(html);
+    });
+
+    worker.on('error', (error) => {
+      console.error('Report generation error:', error);
+      res.status(500).json({ error: 'Failed to generate report' });
+    });
+  } catch (error) {
+    console.error('Report error:', error);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+```
+
+### Prevention
+
+**Never use synchronous file operations in production:**
+
+❌ **Avoid:**
+- `fs.readFileSync()`
+- `fs.writeFileSync()`
+- `fs.readdirSync()`
+- `fs.statSync()`
+
+✅ **Use instead:**
+- `fs.promises.readFile()`
+- `fs.promises.writeFile()`
+- `fs.promises.readdir()`
+- `fs.promises.stat()`
+
+**Monitor event loop lag:**
+
+```javascript
+const { performance } = require('perf_hooks');
+
+let lastCheck = performance.now();
+
+setInterval(() => {
+  const now = performance.now();
+  const lag = now - lastCheck - 100; // 100ms is the interval
+  
+  if (lag > 100) {
+    console.warn(`Event loop lag detected: ${lag}ms`);
+  }
+  
+  lastCheck = now;
+}, 100);
+```
+
+**Use performance monitoring:**
+
+```javascript
+// Track event loop delay
+const { monitorEventLoopDelay } = require('perf_hooks');
+
+const h = monitorEventLoopDelay({ resolution: 20 });
+h.enable();
+
+setInterval(() => {
+  console.log('Event loop delay:', {
+    min: h.min,
+    max: h.max,
+    mean: h.mean,
+    stddev: h.stddev
+  });
+  h.reset();
+}, 10000);
+```
+
+**ESLint rule to prevent sync operations:**
+
+```json
+{
+  "rules": {
+    "no-sync": ["error", { "allowAtRootLevel": true }]
+  }
+}
+```
+
+</Accordion>
+
+## Best Practices
+
+### Async File Operations
+
+**Always use async file APIs:**
+```javascript
+const fs = require('fs/promises');
+
+// Read file
+const content = await fs.readFile(filePath, 'utf-8');
+
+// Write file
+await fs.writeFile(filePath, content);
+
+// Check if file exists
+try {
+  await fs.access(filePath);
+  // File exists
+} catch {
+  // File doesn't exist
+}
+```
+
+### Template Caching
+
+**Cache static templates at startup:**
+```javascript
+const templates = new Map();
+
+async function loadTemplates() {
+  const files = await fs.readdir('./templates');
+  
+  for (const file of files) {
+    const content = await fs.readFile(`./templates/${file}`, 'utf-8');
+    templates.set(file, content);
+  }
+}
+
+// Load on startup
+loadTemplates();
+
+// Use cached template
+const template = templates.get('report.html');
+```
+
+### Worker Threads for CPU-Intensive Tasks
+
+**Offload heavy computation:**
+```javascript
+const { Worker } = require('worker_threads');
+
+function runWorker(data) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('./worker.js', {
+      workerData: data
+    });
+    
+    worker.on('message', resolve);
+    worker.on('error', reject);
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Worker stopped with exit code ${code}`));
+      }
+    });
+  });
+}
+
+// Usage
+const result = await runWorker({ largeDataset });
+```
+
+### Streaming for Large Reports
+
+**Stream data instead of loading everything in memory:**
+```javascript
+router.get('/reports/sales', authenticate, async (req, res) => {
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=sales.csv');
+  
+  // Stream header
+  res.write('Order ID,Total,Status,Date\n');
+  
+  // Stream data in chunks
+  const stream = await Order.findAll({
+    where: { status: 'paid' },
+    stream: true
+  });
+  
+  for await (const order of stream) {
+    res.write(`${order.id},${order.total},${order.status},${order.createdAt}\n`);
+  }
+  
+  res.end();
+});
+```
+
+### Monitoring Event Loop Health
+
+**Track performance metrics:**
+```javascript
+const { performance, monitorEventLoopDelay } = require('perf_hooks');
+
+class EventLoopMonitor {
+  constructor() {
+    this.histogram = monitorEventLoopDelay({ resolution: 20 });
+    this.histogram.enable();
+  }
+  
+  getMetrics() {
+    return {
+      min: this.histogram.min / 1e6, // Convert to ms
+      max: this.histogram.max / 1e6,
+      mean: this.histogram.mean / 1e6,
+      p50: this.histogram.percentile(50) / 1e6,
+      p99: this.histogram.percentile(99) / 1e6
+    };
+  }
+  
+  reset() {
+    this.histogram.reset();
+  }
+}
+
+const monitor = new EventLoopMonitor();
+
+// Expose metrics endpoint
+app.get('/metrics/eventloop', (req, res) => {
+  res.json(monitor.getMetrics());
+});
+```
